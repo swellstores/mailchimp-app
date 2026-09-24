@@ -1,0 +1,8 @@
+{
+	"description": "Two-way ecommerce sync with Mailchimp",
+	"id": "mailchimp",
+	"name": "Mailchimp",
+	"type": "integration",
+	"version": "1.4.0",
+	"permissions": []
+}

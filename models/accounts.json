@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "accounts",
+  "description": "Mailchimp sync state recorded on each customer account. Fields land under $app.mailchimp.* and are written only by functions/lib/sync-state.ts — with one documented exception, functions/lib/account-writeback.ts, which writes email_optin and email when Mailchimp reports an unsubscribe, a clean, or an address change. NOTE: resync/backfill and the saved 'errors' list tab both query sync_status, and that query is a collection scan — Swell has no index declaration yet (developers.swell.is lists 'Custom indexes — Coming soon'). Keep batch sizes small until it ships.",
+  "fields": {
+    "sync_status": {
+      "type": "string",
+      "label": "Mailchimp sync status",
+      "enum": ["pending", "synced", "error", "skipped", "canceled"],
+      "private": true,
+      "description": "pending: queued, or submitted in a batch that has not finished. synced: accepted by Mailchimp. error: last push failed, see last_error. skipped: Mailchimp will not accept the record and retrying cannot help (no email address, for instance). canceled: the customer was removed from the Mailchimp store."
+    },
+    "remote_key": {
+      "type": "string",
+      "private": true,
+      "description": "Idempotency key sent to Mailchimp on every outbound call. Always the Swell account id, used verbatim as the Mailchimp ecommerce customer id, which is what makes a repeated push an update rather than a duplicate. Also the 'has this ever been pushed?' flag."
+    },
+    "remote_id": {
+      "type": "string",
+      "private": true,
+      "description": "The audience member's Mailchimp id — the MD5 of the lowercased email address (Mailchimp calls it the subscriber hash). Unlike the ecommerce customer id this is derived from the email, so it changes when the address does; that is why remote_email is tracked separately."
+    },
+    "batch_id": {
+      "type": "string",
+      "private": true,
+      "description": "Id of the Mailchimp batch submission that queued this account, stamped alongside sync_status 'pending' when a batch backfill submits it. Load-bearing for settlement: polling a batch settles only the records stamped with that batch's id, so a poll of one batch can never mis-mark records another batch still has in flight."
+    },
+    "remote_email": {
+      "type": "string",
+      "private": true,
+      "description": "The email address this account was last pushed under. Audience members are addressed by MD5(lowercase(email)), so after an address change the OLD address is the only way to find the existing member. Without this field an email change silently creates a second member."
+    },
+    "list_status": {
+      "type": "string",
+      "label": "Mailchimp audience status",
+      "enum": ["subscribed", "unsubscribed", "cleaned", "pending", "transactional", "archived"],
+      "private": true,
+      "description": "The member's status in the Mailchimp audience, as last seen on a push or reported by an inbound webhook. 'cleaned' means Mailchimp gave up on the address after hard bounces."
+    },
+    "last_synced_at": {
+      "type": "date",
+      "private": true,
+      "description": "When the account was last accepted by Mailchimp."
+    },
+    "last_webhook_at": {
+      "type": "date",
+      "private": true,
+      "description": "When an inbound Mailchimp webhook was last processed for this account. Also the loop breaker: functions/accounts-sync.ts returns early when this field is among the changed fields of an account.updated event, because that means the change is our own write-back."
+    },
+    "last_webhook_event": {
+      "type": "string",
+      "private": true,
+      "description": "The Mailchimp webhook type that last touched this account: unsubscribe, cleaned, upemail or profile."
+    },
+    "last_webhook_fired_at": {
+      "type": "string",
+      "private": true,
+      "description": "Mailchimp's own `fired_at` for the last applied delivery. Mailchimp does not send a delivery id, so this is the inbound dedupe key: a redelivery carries the same fired_at and is recognised and skipped instead of being applied twice."
+    },
+    "last_error": {
+      "type": "string",
+      "private": true,
+      "description": "Message from the most recent failed push or webhook, truncated to 500 characters. Cleared on the next success."
+    },
+    "resync_requested": {
+      "type": "bool",
+      "default": false,
+      "private": true,
+      "description": "Set from the dashboard to force a re-push on save. The account.updated handler reacts to it and clears it once the push completes. This is the merchant's manual re-sync button, with no UI code."
+    }
+  }
+}

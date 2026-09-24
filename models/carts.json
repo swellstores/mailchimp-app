@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "carts",
+  "description": "Mailchimp sync state recorded on each cart. Fields land under $app.mailchimp.* and are written only by functions/lib/sync-state.ts. Outbound only — Mailchimp has no cart webhooks, so there is no last_webhook_at here. NOTE: resync/backfill and the saved 'errors' list tab both query sync_status, and that query is a collection scan — Swell has no index declaration yet (developers.swell.is lists 'Custom indexes — Coming soon'). Keep batch sizes small until it ships.",
+  "fields": {
+    "sync_status": {
+      "type": "string",
+      "label": "Mailchimp sync status",
+      "enum": ["pending", "synced", "error", "skipped", "canceled"],
+      "private": true,
+      "description": "pending: queued, or submitted in a batch that has not finished. synced: accepted by Mailchimp. error: last push failed, see last_error. skipped: Mailchimp will not accept the cart and retrying cannot help — a guest cart with no account, or a cart with no items. canceled: the cart was deleted from Mailchimp, which is what happens the moment it converts to an order."
+    },
+    "remote_key": {
+      "type": "string",
+      "private": true,
+      "description": "Idempotency key sent to Mailchimp on every outbound call. Always the Swell cart id, used verbatim as the Mailchimp cart id. Carts are the one ecommerce resource with no PUT add-or-update endpoint, so this field is load-bearing: it is what decides between POST (create) and PATCH (update) without an extra probe round trip."
+    },
+    "remote_id": {
+      "type": "string",
+      "private": true,
+      "description": "Mailchimp's own id for the cart. Mailchimp echoes back the id we supplied, so for this app it is always equal to remote_key."
+    },
+    "batch_id": {
+      "type": "string",
+      "private": true,
+      "description": "Id of the Mailchimp batch submission that queued this cart, stamped alongside sync_status 'pending' when a batch backfill submits it. Load-bearing for settlement: polling a batch settles only the records stamped with that batch's id, so a poll of one batch can never mis-mark records another batch still has in flight."
+    },
+    "last_synced_at": {
+      "type": "date",
+      "private": true,
+      "description": "When the cart was last accepted by Mailchimp."
+    },
+    "last_error": {
+      "type": "string",
+      "private": true,
+      "description": "Message from the most recent failed push, truncated to 500 characters. Cleared on the next success."
+    },
+    "resync_requested": {
+      "type": "bool",
+      "default": false,
+      "private": true,
+      "description": "Set from the dashboard to force a re-push on save. The cart.updated handler reacts to it and clears it once the push completes. This is the merchant's manual re-sync button, with no UI code."
+    }
+  }
+}

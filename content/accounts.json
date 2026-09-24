@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json.swell.store/content.json",
+  "collection": "accounts",
+  "description": "Mailchimp sync status on the accounts editor",
+  "fields": [
+    {
+      "id": "sync_status",
+      "label": "Sync status",
+      "type": "select",
+      "options": [
+        { "value": "pending", "label": "Pending" },
+        { "value": "synced", "label": "Synced" },
+        { "value": "error", "label": "Error" },
+        { "value": "skipped", "label": "Skipped" },
+        { "value": "canceled", "label": "Canceled" }
+      ]
+    },
+    {
+      "id": "list_status",
+      "label": "Audience status",
+      "type": "select",
+      "options": [
+        { "value": "subscribed", "label": "Subscribed" },
+        { "value": "unsubscribed", "label": "Unsubscribed" },
+        { "value": "cleaned", "label": "Cleaned (bounced)" },
+        { "value": "pending", "label": "Pending confirmation" },
+        { "value": "transactional", "label": "Transactional only" },
+        { "value": "archived", "label": "Archived" }
+      ]
+    },
+    {
+      "id": "remote_id",
+      "label": "Mailchimp member ID",
+      "type": "text",
+      "description": "The MD5 of the lowercased email address. Mailchimp calls it the subscriber hash."
+    },
+    {
+      "id": "remote_email",
+      "label": "Subscribed as",
+      "type": "text",
+      "description": "The address this account was last pushed under. Differs from the account email only between an address change and the next successful push."
+    },
+    {
+      "id": "last_synced_at",
+      "label": "Last synced",
+      "type": "datetime"
+    },
+    {
+      "id": "last_webhook_at",
+      "label": "Last webhook received",
+      "type": "datetime"
+    },
+    {
+      "id": "last_webhook_event",
+      "label": "Last webhook",
+      "type": "text"
+    },
+    {
+      "id": "last_error",
+      "label": "Last error",
+      "type": "textarea"
+    },
+    {
+      "id": "remote_key",
+      "label": "Sync key",
+      "type": "text",
+      "description": "Identifier Mailchimp uses to match this customer. Always the Swell account id."
+    },
+    {
+      "id": "resync_requested",
+      "label": "Re-sync on save",
+      "type": "toggle",
+      "description": "Turn on and save to push this account to Mailchimp again. Switches itself off once the push finishes."
+    }
+  ],
+  "views": [
+    {
+      "id": "edit",
+      "tabs": [
+        {
+          "id": "mailchimp",
+          "label": "Mailchimp",
+          "fields": [
+            { "id": "sync_status", "readonly": true, "admin_span": 2 },
+            { "id": "list_status", "readonly": true, "admin_span": 2 },
+            { "id": "last_synced_at", "readonly": true, "admin_span": 2 },
+            { "id": "last_webhook_at", "readonly": true, "admin_span": 2 },
+            { "id": "remote_email", "readonly": true, "admin_span": 2 },
+            { "id": "last_webhook_event", "readonly": true, "admin_span": 2 },
+            { "id": "remote_id", "readonly": true, "admin_span": 2 },
+            {
+              "id": "last_error",
+              "readonly": true,
+              "conditions": { "last_error": { "$exists": true } }
+            },
+            {
+              "id": "resync_requested",
+              "conditions": { "$settings.mailchimp.enabled": true }
+            },
+            { "id": "remote_key", "readonly": true }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "fields": [{ "id": "sync_status", "label": "Mailchimp" }],
+      "tabs": [
+        {
+          "id": "mailchimp_errors",
+          "label": "Mailchimp errors",
+          "query": { "where": { "sync_status": "error" } }
+        },
+        {
+          "id": "mailchimp_not_synced",
+          "label": "Not synced to Mailchimp",
+          "query": { "where": { "sync_status": { "$in": ["skipped", "canceled"] } } }
+        }
+      ]
+    }
+  ]
+}

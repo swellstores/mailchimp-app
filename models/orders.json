@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json.swell.store/model.json",
+  "collection": "orders",
+  "description": "Mailchimp sync state recorded on each order. Fields land under $app.mailchimp.* and are written only by functions/lib/sync-state.ts. Outbound only — Mailchimp has no order webhooks, so there is no last_webhook_at here. NOTE: resync/backfill and the saved 'errors' list tab both query sync_status, and that query is a collection scan — Swell has no index declaration yet (developers.swell.is lists 'Custom indexes — Coming soon'). Keep batch sizes small until it ships.",
+  "fields": {
+    "sync_status": {
+      "type": "string",
+      "label": "Mailchimp sync status",
+      "enum": ["pending", "synced", "error", "skipped", "canceled"],
+      "private": true,
+      "description": "pending: queued, or submitted in a batch that has not finished. synced: accepted by Mailchimp. error: last push failed, see last_error. skipped: Mailchimp will not accept the order and retrying cannot help — no customer account, or no items. canceled: the order was canceled in Swell and cancelled_at_foreign was pushed, or the order was deleted from Mailchimp."
+    },
+    "remote_key": {
+      "type": "string",
+      "private": true,
+      "description": "Idempotency key sent to Mailchimp on every outbound call. Always the Swell order id, used verbatim as the Mailchimp order id, which is what makes a repeated push an update rather than a duplicate. Also the 'has this ever been pushed?' flag."
+    },
+    "remote_id": {
+      "type": "string",
+      "private": true,
+      "description": "Mailchimp's own id for the order. Mailchimp echoes back the id we supplied, so for this app it is always equal to remote_key."
+    },
+    "batch_id": {
+      "type": "string",
+      "private": true,
+      "description": "Id of the Mailchimp batch submission that queued this order, stamped alongside sync_status 'pending' when a batch backfill submits it. Load-bearing for settlement: polling a batch settles only the records stamped with that batch's id, so a poll of one batch can never mis-mark records another batch still has in flight."
+    },
+    "last_synced_at": {
+      "type": "date",
+      "private": true,
+      "description": "When the order was last accepted by Mailchimp."
+    },
+    "last_error": {
+      "type": "string",
+      "private": true,
+      "description": "Message from the most recent failed push, truncated to 500 characters. Cleared on the next success. The common one is a line item referencing a product that has never been pushed — run the products backfill, then the daily reconciler clears it."
+    },
+    "resync_requested": {
+      "type": "bool",
+      "default": false,
+      "private": true,
+      "description": "Set from the dashboard to force a re-push on save. The order.updated handler reacts to it and clears it once the push completes. This is the merchant's manual re-sync button, with no UI code."
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json.swell.store/content.json",
+  "collection": "carts",
+  "description": "Mailchimp sync status on the carts editor",
+  "fields": [
+    {
+      "id": "sync_status",
+      "label": "Sync status",
+      "type": "select",
+      "options": [
+        { "value": "pending", "label": "Pending" },
+        { "value": "synced", "label": "Synced" },
+        { "value": "error", "label": "Error" },
+        { "value": "skipped", "label": "Skipped" },
+        { "value": "canceled", "label": "Removed from Mailchimp" }
+      ]
+    },
+    {
+      "id": "remote_id",
+      "label": "Mailchimp cart ID",
+      "type": "text"
+    },
+    {
+      "id": "last_synced_at",
+      "label": "Last synced",
+      "type": "datetime"
+    },
+    {
+      "id": "last_error",
+      "label": "Last error",
+      "type": "textarea"
+    },
+    {
+      "id": "remote_key",
+      "label": "Sync key",
+      "type": "text",
+      "description": "Identifier Mailchimp uses to match this cart. Always the Swell cart id."
+    },
+    {
+      "id": "resync_requested",
+      "label": "Re-sync on save",
+      "type": "toggle",
+      "description": "Turn on and save to push this cart to Mailchimp again. Switches itself off once the push finishes."
+    }
+  ],
+  "views": [
+    {
+      "id": "edit",
+      "tabs": [
+        {
+          "id": "mailchimp",
+          "label": "Mailchimp",
+          "fields": [
+            { "id": "sync_status", "readonly": true, "admin_span": 2 },
+            { "id": "last_synced_at", "readonly": true, "admin_span": 2 },
+            { "id": "remote_id", "readonly": true, "admin_span": 2 },
+            {
+              "id": "last_error",
+              "readonly": true,
+              "conditions": { "last_error": { "$exists": true } }
+            },
+            {
+              "id": "resync_requested",
+              "conditions": { "$settings.mailchimp.enabled": true }
+            },
+            { "id": "remote_key", "readonly": true }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "fields": [{ "id": "sync_status", "label": "Mailchimp" }],
+      "tabs": [
+        {
+          "id": "mailchimp_errors",
+          "label": "Mailchimp errors",
+          "query": { "where": { "sync_status": "error" } }
+        },
+        {
+          "id": "mailchimp_not_synced",
+          "label": "Not synced to Mailchimp",
+          "query": { "where": { "sync_status": { "$in": ["skipped", "canceled"] } } }
+        }
+      ]
+    }
+  ]
+}

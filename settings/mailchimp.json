@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json.swell.store/setting.json",
+  "label": "Mailchimp",
+  "description": "Two-way ecommerce sync with Mailchimp: customers, products, carts and orders into a Mailchimp ecommerce store, plus inbound unsubscribe, cleaned and email-change webhooks written back to the Swell account. Disable the native Mailchimp integration before enabling this app, otherwise every customer email is pushed twice.",
+  "fields": [
+    {
+      "id": "enabled",
+      "label": "Enable Mailchimp sync",
+      "type": "toggle",
+      "default": false,
+      "description": "Master switch. While off, nothing is pushed to Mailchimp and incoming webhooks are acknowledged but ignored. Every handler checks this in code — app settings cannot be used in function conditions, see the README."
+    },
+    {
+      "type": "field_group",
+      "label": "Credentials",
+      "fields": [
+        {
+          "id": "api_key",
+          "label": "API key",
+          "type": "text",
+          "required": true,
+          "description": "Found in Mailchimp → Profile → Extras → API keys. Keep the datacenter suffix: a key ending in \"-us14\" means the API lives at https://us14.api.mailchimp.com/3.0, and this app derives that host from the key automatically."
+        },
+        {
+          "id": "list_id",
+          "label": "Audience ID",
+          "type": "text",
+          "required": true,
+          "description": "Found in Mailchimp → Audience → Settings → Audience name and defaults, shown as \"Audience ID\". Ecommerce stores are permanently bound to one audience, so this cannot be changed after the store is created — Mailchimp rejects it."
+        },
+        {
+          "id": "api_base",
+          "label": "API base URL override",
+          "type": "text",
+          "description": "Optional. Leave empty to derive https://<dc>.api.mailchimp.com/3.0 from the API key's datacenter suffix. Set it only to point at a mock server, or if a key somehow arrives without a suffix."
+        }
+      ]
+    },
+    {
+      "type": "field_group",
+      "label": "Ecommerce store",
+      "description": "Mailchimp holds ecommerce data inside a store record that must exist before any customer, product, cart or order can be written. Run the setup route once after filling these in.",
+      "fields": [
+        {
+          "id": "store_id",
+          "label": "Store ID",
+          "type": "text",
+          "description": "The Mailchimp ecommerce store id this app owns. Leave empty to use the Swell store id. Changing it after records have synced orphans everything already pushed."
+        },
+        {
+          "id": "store_name",
+          "label": "Store name",
+          "type": "text",
+          "description": "Shown in Mailchimp's ecommerce reports. Defaults to the Swell store id when empty."
+        },
+        {
+          "id": "store_currency",
+          "label": "Store currency",
+          "type": "text",
+          "default": "USD",
+          "description": "Three-letter ISO code for the Mailchimp store record. Individual orders and carts still carry their own currency; this is only the store's reporting default."
+        },
+        {
+          "id": "store_domain",
+          "label": "Storefront domain",
+          "type": "text",
+          "description": "Optional, e.g. shop.example.com. Mailchimp requires it for Connected Sites and Google Ads, and it is used to build product and order URLs."
+        }
+      ]
+    },
+    {
+      "type": "field_group",
+      "label": "Sync",
+      "fields": [
+        {
+          "id": "push_trigger",
+          "label": "Push records to Mailchimp",
+          "type": "select",
+          "default": "automatic",
+          "description": "When a record should first appear in Mailchimp.",
+          "options": [
+            {
+              "value": "automatic",
+              "label": "Automatically, as events fire"
+            },
+            {
+              "value": "manual",
+              "label": "Only when re-synced manually or backfilled"
+            }
+          ]
+        },
+        {
+          "id": "sync_accounts",
+          "label": "Sync customer accounts",
+          "type": "toggle",
+          "default": true,
+          "description": "Push each Swell account to the Mailchimp ecommerce store as a customer, and — when the account has opted in — to the audience as a member. This is the only thing the native integration does."
+        },
+        {
+          "id": "sync_products",
+          "label": "Sync products",
+          "type": "toggle",
+          "default": true,
+          "description": "Push products and their variants. Carts and orders reference these, so Mailchimp rejects a cart or order line whose product has never been pushed."
+        },
+        {
+          "id": "sync_carts",
+          "label": "Sync carts",
+          "type": "toggle",
+          "default": true,
+          "description": "Push carts so Mailchimp's abandoned-cart automation has something to act on. A cart is deleted from Mailchimp the moment it converts to an order, which is what stops the automation emailing a customer who already bought."
+        },
+        {
+          "id": "cart_scope",
+          "label": "Which carts to sync",
+          "type": "select",
+          "default": "all",
+          "description": "Mailchimp starts its abandoned-cart timer when the cart arrives, so \"All active carts\" is the setting that actually produces abandoned-cart emails. Choose abandoned-only to cut outbound traffic at the cost of the automation firing late.",
+          "options": [
+            {
+              "value": "all",
+              "label": "All active carts"
+            },
+            {
+              "value": "abandoned",
+              "label": "Only carts Swell has marked abandoned"
+            }
+          ]
+        },
+        {
+          "id": "sync_orders",
+          "label": "Sync orders",
+          "type": "toggle",
+          "default": true,
+          "description": "Push orders, which is what makes purchase history, post-purchase automations and product-recommendation blocks work."
+        },
+        {
+          "id": "event_created",
+          "label": "Sync new records",
+          "type": "toggle",
+          "default": true,
+          "description": "Push a record to Mailchimp the first time it is created or submitted."
+        },
+        {
+          "id": "event_updated",
+          "label": "Sync edits",
+          "type": "toggle",
+          "default": true,
+          "description": "Re-push a record when it changes. Pushes are idempotent — the Swell record id is the key Mailchimp matches on — so a re-push updates rather than duplicates."
+        },
+        {
+          "id": "event_deleted",
+          "label": "Sync deletions",
+          "type": "toggle",
+          "default": false,
+          "description": "Delete the record in Mailchimp when it is deleted in Swell. Off by default: Mailchimp deletions are unrecoverable and take the associated ecommerce reporting with them. Carts are always deleted on conversion regardless of this setting, because leaving them would keep abandoned-cart emails going to customers who bought."
+        },
+        {
+          "id": "push_optout",
+          "label": "Push opt-in changes to Mailchimp",
+          "type": "toggle",
+          "default": true,
+          "description": "When an account's marketing opt-in is switched off in Swell, unsubscribe the matching audience member. When it is switched on, subscribe them. Someone who unsubscribed through Mailchimp is in Mailchimp's compliance state and cannot be re-subscribed by an app, so they are set to pending instead and Mailchimp emails them to confirm."
+        },
+        {
+          "id": "archive_on_delete",
+          "label": "Archive audience member when an account is deleted",
+          "type": "toggle",
+          "default": true,
+          "description": "When a customer account is deleted in Swell, archive their audience member in Mailchimp, as the built-in integration does. Archiving is reversible in Mailchimp. The ecommerce customer and its order history are kept."
+        }
+      ]
+    },
+    {
+      "type": "field_group",
+      "label": "Inbound webhooks",
+      "fields": [
+        {
+          "id": "webhook_secret",
+          "label": "Webhook secret",
+          "type": "text",
+          "description": "Any random string of 16 characters or more. Added to the public callback URL and compared on every delivery. Required before the setup route will register webhooks with Mailchimp. Re-run setup after changing it."
+        },
+        {
+          "id": "webhook_signing_secret",
+          "label": "Webhook signing secret",
+          "type": "text",
+          "description": "Optional, and only if your Mailchimp account issues one. Newer accounts sign deliveries with an X-Mailchimp-Signature header (t=<unix>,v1=<hmac-sha256>); paste the signing secret here to have every delivery's signature verified as well as its URL secret. The value is shown once, at webhook creation, and cannot be retrieved afterwards."
+        },
+        {
+          "id": "webhook_writeback",
+          "label": "Write unsubscribes back to Swell",
+          "type": "toggle",
+          "default": true,
+          "description": "When Mailchimp reports an unsubscribe or a cleaned address, clear email_optin on the matching Swell account; when it reports an email change, update the account's address. This is the only part of the app that writes a field outside its own $app namespace — see functions/lib/account-writeback.ts."
+        },
+        {
+          "id": "callback_url",
+          "label": "Callback URL override",
+          "type": "text",
+          "description": "Optional. The public URL Mailchimp should post to. Leave empty to derive it from the store id and this app's ObjectId. Public route functions resolve the live environment only, so set this to a tunnel while developing against a test-only push."
+        },
+        {
+          "id": "app_object_id",
+          "label": "App ObjectId override",
+          "type": "text",
+          "description": "Optional escape hatch. A public route resolves at /functions/<24-character hex ObjectId>/<name> — NOT at /functions/mailchimp/<name>, which returns 404 while Mailchimp still reports the subscription as created. The app normally discovers the ObjectId from the platform's own function registry; paste the id= value from .swellrc here if that lookup ever fails."
+        },
+        {
+          "id": "allow_test_payload",
+          "label": "Accept test webhook payloads",
+          "type": "toggle",
+          "default": false,
+          "description": "Development aid. Lets the webhook function accept a JSON body instead of Mailchimp's form-encoded one, so the route can be exercised with `swell api post`. Keep this off in production."
+        }
+      ]
+    }
+  ]
+}

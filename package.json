@@ -1,0 +1,19 @@
+{
+  "description": "Two-way ecommerce sync with Mailchimp",
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "~0.12.0",
+    "@swell/app-types": "^1.2.3",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "~3.2.0"
+  },
+  "name": "mailchimp",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "rc=0; { [ -z \"$(find functions -name '*.ts' 2>/dev/null | head -1)\" ] || tsc --noEmit; } || rc=1; { [ ! -f test/tsconfig.json ] || tsc --build --noEmit test; } || rc=1; { [ ! -f frontend/tsconfig.json ] || tsc --build --noEmit frontend; } || rc=1; exit $rc",
+    "validate": "node scripts/validate-schemas.mjs"
+  },
+  "version": "1.0.0"
+}

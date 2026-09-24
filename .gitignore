@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# .swellrc is COMMITTED on purpose. It pins this repo to the official app
+# record on the swell-apps account, so anyone who clones it pushes to the same
+# app rather than creating a duplicate. Per the Internal App Dev Guide.
+# Never commit a .swellrc minted against a dev or test store.
+
+# Secrets / local env — credentials live in store settings, never in the repo
+.env
+.env.*
+*.local
+.dev.vars
+.dev.vars.*
+
+# Build and tool output
+dist/
+build/
+.wrangler/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
