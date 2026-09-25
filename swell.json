@@ -1,8 +1,63 @@
 {
-	"description": "Two-way ecommerce sync with Mailchimp",
+	"description": "Sync customers, products, carts and orders with Mailchimp",
 	"id": "mailchimp",
 	"name": "Mailchimp",
 	"type": "integration",
 	"version": "1.4.0",
-	"permissions": []
+	"permissions": [],
+	"support_email": "support@swell.is",
+	"repository_url": "https://github.com/swellstores/mailchimp-app",
+	"highlights": [
+		{
+			"id": "carts",
+			"title": "Abandoned-cart emails that work",
+			"description": "Carts sync with a link back to checkout and are removed once they become orders, so nobody is reminded about a purchase."
+		},
+		{
+			"id": "orders",
+			"title": "Order emails and purchase history",
+			"description": "Orders sync with items, totals, discounts and status, powering order emails, purchase segments and each contact's order history."
+		},
+		{
+			"id": "unsubscribes",
+			"title": "Unsubscribes stay in step",
+			"description": "Unsubscribes, bounces and email changes made in Mailchimp flow back to Swell, so you never market to someone who opted out."
+		},
+		{
+			"id": "products",
+			"title": "Products in every email",
+			"description": "Products and variants sync with prices, stock, images and links for Mailchimp's product blocks and recommendations."
+		},
+		{
+			"id": "backfill",
+			"title": "A first sync that emails no one",
+			"description": "Existing customers, products and orders are sent in bulk with automations paused, so no one hears about old orders."
+		}
+	],
+	"images": [
+		{
+			"id": "cover",
+			"image_src": "assets/screenshots/01-cover.png",
+			"title": "Mailchimp for Swell",
+			"description": "Customers, products, carts and orders stay in sync with Mailchimp, and unsubscribes come back to Swell."
+		},
+		{
+			"id": "flow",
+			"image_src": "assets/screenshots/02-how-it-works.png",
+			"title": "Two-way sync",
+			"description": "Store data goes to Mailchimp as it changes, and unsubscribes, bounces and email changes made in Mailchimp come back."
+		},
+		{
+			"id": "settings",
+			"image_src": "assets/screenshots/03-settings.png",
+			"title": "Choose exactly what syncs",
+			"description": "Turn customers, products, carts and orders on or off, pick which carts count, and decide how opt-ins are handled."
+		},
+		{
+			"id": "automations",
+			"image_src": "assets/screenshots/04-automations.png",
+			"title": "Mailchimp's ecommerce features, on",
+			"description": "Abandoned-cart emails, order notifications, product recommendations, purchase segments and order history."
+		}
+	]
 }

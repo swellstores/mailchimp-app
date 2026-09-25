@@ -5,7 +5,7 @@
 Connects a Swell store to [Mailchimp](https://mailchimp.com). Customers, products, carts and
 orders are kept in sync with the merchant's Mailchimp account, so Mailchimp's ecommerce
 features work: abandoned-cart emails, order notifications, product recommendations,
-purchase-based segments and revenue reporting. Unsubscribes, bounced addresses and email
+purchase-based segments and order history on each contact. Unsubscribes, bounced addresses and email
 changes made in Mailchimp flow back into Swell, so the store never keeps marketing to
 someone who opted out there. It replaces Swell's built-in Mailchimp integration, which only
 adds opted-in email addresses to an audience.
@@ -66,7 +66,7 @@ removed from Mailchimp, so nobody gets an abandoned-cart email for something the
 
 **What it does.** Orders are sent with their items, totals, discounts, and payment and
 fulfillment status, which is what Mailchimp's order notification and post-purchase
-automations, and its revenue reports, use.
+automations, and its purchase-based segments, use.
 
 **How it's built.** `functions/orders-sync.ts` on submission and on the status changes those
 automations key on.
@@ -241,6 +241,9 @@ built-in Mailchimp integration is still on.
 - **One currency per Mailchimp store.** Orders and carts carry their own currency, but
   product prices are sent without conversion, so a multi-currency store sees mixed
   currencies in Mailchimp's product reports.
+- **No campaign attribution.** Orders are sent without the `campaign_id` of the Mailchimp
+  email that led to them (the `mc_cid` link parameter isn't captured), so Mailchimp doesn't
+  credit revenue to individual campaigns or automations.
 - **Not included:** Mailchimp promo rules and promo codes (coupons are sent on each order),
   campaign webhooks, Mailchimp's site tracking script, and forced removal of deleted product
   variants.
