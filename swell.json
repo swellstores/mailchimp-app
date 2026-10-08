@@ -6,6 +6,8 @@
 	"version": "1.4.0",
 	"permissions": [],
 	"support_email": "support@swell.is",
+	"documentation_url": "https://developers.swell.is/app-guides/mailchimp",
+	"price_external": true,
 	"repository_url": "https://github.com/swellstores/mailchimp-app",
 	"highlights": [
 		{
@@ -21,7 +23,7 @@
 		{
 			"id": "unsubscribes",
 			"title": "Unsubscribes stay in step",
-			"description": "Unsubscribes, bounces and email changes made in Mailchimp flow back to Swell, so you never market to someone who opted out."
+			"description": "Unsubscribes, bounces and email changes made in Mailchimp flow back to Swell's live store, so opt-outs stay in step."
 		},
 		{
 			"id": "products",

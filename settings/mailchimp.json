@@ -17,7 +17,7 @@
         {
           "id": "api_key",
           "label": "API key",
-          "type": "text",
+          "type": "secret",
           "required": true,
           "description": "Found in Mailchimp → Profile → Extras → API keys. Keep the datacenter suffix: a key ending in \"-us14\" means the API lives at https://us14.api.mailchimp.com/3.0, and this app derives that host from the key automatically."
         },
@@ -178,13 +178,13 @@
         {
           "id": "webhook_secret",
           "label": "Webhook secret",
-          "type": "text",
+          "type": "secret",
           "description": "Any random string of 16 characters or more. Added to the public callback URL and compared on every delivery. Required before the setup route will register webhooks with Mailchimp. Re-run setup after changing it."
         },
         {
           "id": "webhook_signing_secret",
           "label": "Webhook signing secret",
-          "type": "text",
+          "type": "secret",
           "description": "Optional, and only if your Mailchimp account issues one. Newer accounts sign deliveries with an X-Mailchimp-Signature header (t=<unix>,v1=<hmac-sha256>); paste the signing secret here to have every delivery's signature verified as well as its URL secret. The value is shown once, at webhook creation, and cannot be retrieved afterwards."
         },
         {
