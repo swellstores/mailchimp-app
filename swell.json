@@ -3,7 +3,7 @@
 	"id": "mailchimp",
 	"name": "Mailchimp",
 	"type": "integration",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"permissions": [],
 	"support_email": "support@swell.is",
 	"documentation_url": "https://developers.swell.is/app-guides/mailchimp",
