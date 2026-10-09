@@ -38,7 +38,6 @@ import { provisionAfterNotFound } from './store';
 import {
   SyncCollection,
   SyncState,
-  SyncStatus,
   readSyncState,
   recordSyncState,
 } from './sync-state';
@@ -69,8 +68,6 @@ export interface PushResult {
 export interface PushOptions {
   /** Update and delete paths only touch records Mailchimp already knows about. */
   requireExisting?: boolean;
-  /** Overrides the status written on success, e.g. 'canceled' from the cart-converted path. */
-  successStatus?: SyncStatus;
   /**
    * Accounts only: this event changed `email_optin`. An opt-in then (re)subscribes an
    * existing member, which the upsert's `status_if_new` alone never does.
@@ -233,9 +230,10 @@ async function pushAudienceMember(
   // fit inside the platform's 10 second ceiling.
   // An opt-in made in this very event is explicit consent, so an existing member who had
   // unsubscribed or was transactional-only is subscribed again, as the native integration
-  // does. Any other push leaves an existing member's status alone.
+  // does — when "Push opt-in changes to Mailchimp" is on. Any other push leaves an
+  // existing member's status alone.
   const payload = buildMemberPayload(account);
-  if (optedIn && optinChanged) {
+  if (optedIn && optinChanged && settings.push_optout) {
     payload.status = 'subscribed';
   }
   let member: Record<string, any>;
@@ -447,7 +445,7 @@ export async function pushRecord(
       options,
     );
     await recordSyncState(req, collection, recordId, {
-      sync_status: options.successStatus ?? 'synced',
+      sync_status: 'synced',
       remote_key: recordId,
       last_synced_at: new Date().toISOString(),
       last_error: null,

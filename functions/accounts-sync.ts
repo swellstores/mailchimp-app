@@ -62,21 +62,23 @@ export default async function (req: SwellRequest) {
       if (!resync && !settings.event_updated) {
         return;
       }
-      if (!resync && settings.push_trigger === 'manual') {
-        return;
-      }
 
       // Opting in is a reason to create the member even if this account was never sent:
       // the native integration does, and otherwise a customer who ticks the box after
-      // signing up never reaches the audience.
+      // signing up never reaches the audience. Only when opt-in changes are pushed at all,
+      // and not in manual mode, where nothing is sent for the first time automatically.
       const optinChanged = 'email_optin' in changed;
-      const optedInNow = optinChanged && req.data.email_optin === true;
+      const optedInNow =
+        optinChanged && req.data.email_optin === true && settings.push_optout;
+      const manual = settings.push_trigger === 'manual';
 
       throwIfFailed(
         await pushRecord(req, settings, 'accounts', req.data.id, {
           // A manual re-sync may legitimately be the first push, and so may an opt-in.
-          // Any other incidental edit should not create a customer Mailchimp has never seen.
-          requireExisting: !resync && !optedInNow,
+          // Any other edit only updates an account Mailchimp already has — in manual mode
+          // too: "Push records" decides when a record first appears, and an account the
+          // backfill sent still gets its edits and opt-outs.
+          requireExisting: !resync && (manual || !optedInNow),
           optinChanged,
         }),
       );

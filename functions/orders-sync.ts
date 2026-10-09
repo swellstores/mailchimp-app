@@ -59,7 +59,13 @@ export default async function (req: SwellRequest) {
 
     // Lifecycle events carry no changed-field set worth filtering on — the event *is* the
     // change — and each one moves `financial_status` or `fulfillment_status`, which is
-    // what Mailchimp's Order Notification automations key on. So they push directly.
+    // what Mailchimp's Order Notification automations key on. So they push directly, to
+    // orders Mailchimp already has. That holds in manual mode too: "Push records" decides
+    // when a record first appears, not whether one already there is kept current.
+    //
+    // A canceled order is recorded 'synced', not 'canceled': it is still in Mailchimp,
+    // carrying financial_status "cancelled", and 'canceled' would list it under
+    // "Not synced to Mailchimp".
     case 'order.paid':
     case 'order.canceled':
     case 'order.delivered': {
@@ -69,7 +75,6 @@ export default async function (req: SwellRequest) {
       throwIfFailed(
         await pushRecord(req, settings, 'orders', req.data.id, {
           requireExisting: true,
-          successStatus: type === 'order.canceled' ? 'canceled' : undefined,
         }),
       );
       return;
@@ -84,10 +89,8 @@ export default async function (req: SwellRequest) {
       if (!resync && !settings.event_updated) {
         return;
       }
-      if (!resync && settings.push_trigger === 'manual') {
-        return;
-      }
 
+      // Never a first push unless re-sync was asked for, so manual mode needs no extra gate.
       throwIfFailed(
         await pushRecord(req, settings, 'orders', req.data.id, {
           requireExisting: !resync,

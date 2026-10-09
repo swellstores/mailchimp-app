@@ -81,9 +81,6 @@ export default async function (req: SwellRequest) {
       if (!resync && !settings.event_updated) {
         return;
       }
-      if (!resync && settings.push_trigger === 'manual') {
-        return;
-      }
 
       let productId = req.data.id as string;
       if (type === 'product.variant.updated') {
@@ -97,7 +94,10 @@ export default async function (req: SwellRequest) {
 
       throwIfFailed(
         await pushRecord(req, settings, 'products', productId, {
-          requireExisting: !resync && type === 'product.updated',
+          // Stock and variant events may be a product's first push, except in manual mode,
+          // where only the backfill or a re-sync sends a record for the first time.
+          requireExisting:
+            !resync && (type === 'product.updated' || settings.push_trigger === 'manual'),
         }),
       );
       return;

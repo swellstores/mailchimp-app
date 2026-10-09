@@ -77,7 +77,7 @@
           "label": "Push records to Mailchimp",
           "type": "select",
           "default": "automatic",
-          "description": "When a record should first appear in Mailchimp.",
+          "description": "When a record is first sent to Mailchimp. Automatically sends new customers, products, carts and submitted orders as they appear. Manual sends a record for the first time only through the backfill or Re-sync on save. Either way, a record already in Mailchimp is kept up to date when it changes (with Sync edits on), including order status and opt-outs.",
           "options": [
             {
               "value": "automatic",
@@ -94,7 +94,7 @@
           "label": "Sync customer accounts",
           "type": "toggle",
           "default": true,
-          "description": "Push each Swell account to the Mailchimp ecommerce store as a customer, and — when the account has opted in — to the audience as a member. This is the only thing the native integration does."
+          "description": "Send each Swell account to the Mailchimp ecommerce store as a customer and to the audience as a member. Customers who opted in are subscribed. Customers with no answer are added as transactional contacts, who get order emails but no campaigns. Customers who opted out are unsubscribed if they are already in the audience, and otherwise not added. The built-in integration only adds opted-in customers."
         },
         {
           "id": "sync_products",
@@ -160,7 +160,7 @@
           "label": "Push opt-in changes to Mailchimp",
           "type": "toggle",
           "default": true,
-          "description": "When an account's marketing opt-in is switched off in Swell, unsubscribe the matching audience member. When it is switched on, subscribe them. Someone who unsubscribed through Mailchimp is in Mailchimp's compliance state and cannot be re-subscribed by an app, so they are set to pending instead and Mailchimp emails them to confirm."
+          "description": "When an account's marketing opt-in is switched off in Swell, unsubscribe the matching audience member. When it is switched on, subscribe them, and send the customer to Mailchimp if they were not there yet (unless Push records is manual). Someone who unsubscribed through Mailchimp is in Mailchimp's compliance state and cannot be re-subscribed by an app, so they are set to pending instead and Mailchimp emails them to confirm. Opt-in changes are edits, so they also need Sync edits on. When this is off, opt-in changes leave an existing member's status alone."
         },
         {
           "id": "archive_on_delete",

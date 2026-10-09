@@ -8,7 +8,7 @@
       "label": "Mailchimp sync status",
       "enum": ["pending", "synced", "error", "skipped", "canceled"],
       "private": true,
-      "description": "pending: queued, or submitted in a batch that has not finished. synced: accepted by Mailchimp. error: last push failed, see last_error. skipped: Mailchimp will not accept the order and retrying cannot help — no customer account, or no items. canceled: the order was canceled in Swell and cancelled_at_foreign was pushed, or the order was deleted from Mailchimp."
+      "description": "pending: queued, or submitted in a batch that has not finished. synced: accepted by Mailchimp. error: last push failed, see last_error. skipped: Mailchimp will not accept the order and retrying cannot help — no customer account, or no items. canceled: the order was deleted from Mailchimp. A canceled order stays synced: it is still in Mailchimp, with financial_status cancelled."
     },
     "remote_key": {
       "type": "string",

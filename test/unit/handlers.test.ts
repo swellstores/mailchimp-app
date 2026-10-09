@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import accountsSync from "../../functions/accounts-sync";
 import cartsSync from "../../functions/carts-sync";
 import ordersSync from "../../functions/orders-sync";
+import productsSync from "../../functions/products-sync";
 import { deleteRecord, pushRecord } from "../../functions/lib/push";
 import { hasRelevantChange } from "../../functions/lib/events";
 import { getSettings } from "../../functions/lib/settings";
@@ -9,9 +10,11 @@ import { createMockRequest } from "../helpers/mock-request";
 import {
   ACCOUNT_ID,
   CART_ID,
+  PRODUCT_ID,
   RECORD_ID,
   account,
   cart,
+  product,
   jsonResponse,
   mailchimpError,
   mailchimpMember,
@@ -318,6 +321,68 @@ describe("orders-sync", () => {
       expect(fetchMock, `${type} should push`).toHaveBeenCalledTimes(1);
     }
   });
+
+  it("records a canceled order as synced, because it is still in Mailchimp", async () => {
+    // It used to be stamped 'canceled', which lists it under "Not synced to Mailchimp"
+    // although Mailchimp holds it with financial_status "cancelled".
+    const { req, swell } = harness({
+      data: { id: RECORD_ID, $event: { type: "order.canceled", data: {} } },
+      record: withSyncState(order({ canceled: true }), { remote_key: RECORD_ID }),
+      fetchImpl: async () => jsonResponse(200, { id: RECORD_ID }),
+    });
+
+    await ordersSync(req);
+
+    expect(swell.put.mock.calls[0][1].$app.mailchimp.sync_status).toBe("synced");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Manual push mode: no automatic first push, but records already sent stay current
+// ---------------------------------------------------------------------------
+
+describe("push_trigger manual", () => {
+  const MANUAL = { mailchimp: { ...SETTINGS.mailchimp, push_trigger: "manual" } };
+
+  it("sends no record for the first time on its own", async () => {
+    const cases: Array<[string, (req: any) => Promise<unknown>, Record<string, any>, Record<string, any>]> = [
+      ["account.created", accountsSync, { id: ACCOUNT_ID }, account()],
+      ["account.updated", accountsSync, { id: ACCOUNT_ID, email_optin: true, $changed: { email_optin: true } }, account()],
+      ["cart.abandoned", cartsSync, { id: CART_ID }, cart()],
+      ["order.submitted", ordersSync, { id: RECORD_ID }, order()],
+      ["product.stock_adjusted", productsSync, { id: PRODUCT_ID }, product()],
+    ];
+    for (const [type, handler, data, record] of cases) {
+      const { $changed = {}, ...rest } = data;
+      const { req, fetchMock } = harness({
+        data: { ...rest, $event: { type, data: $changed } },
+        record,
+        settings: MANUAL,
+      });
+      await handler(req);
+      expect(fetchMock, `${type} must not first-push in manual mode`).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps records Mailchimp already has up to date", async () => {
+    const cases: Array<[string, (req: any) => Promise<unknown>, string, Record<string, any>, Record<string, any>]> = [
+      ["account.updated", accountsSync, ACCOUNT_ID, { email_optin: false }, account({ email_optin: false })],
+      ["cart.updated", cartsSync, CART_ID, { items: [] }, cart()],
+      ["order.updated", ordersSync, RECORD_ID, { paid: true }, order()],
+      ["order.paid", ordersSync, RECORD_ID, {}, order()],
+      ["product.updated", productsSync, PRODUCT_ID, { price: 10 }, product()],
+    ];
+    for (const [type, handler, id, changed, record] of cases) {
+      const { req, fetchMock } = harness({
+        data: { id, $event: { type, data: changed } },
+        record: withSyncState(record, { remote_key: id }),
+        settings: MANUAL,
+        fetchImpl: async () => jsonResponse(200, mailchimpMember({ id })),
+      });
+      await handler(req);
+      expect(fetchMock, `${type} should update a record already in Mailchimp`).toHaveBeenCalled();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -553,6 +618,37 @@ describe("accounts-sync audience membership", () => {
     // Explicit consent in this event, so an existing unsubscribed/transactional member is
     // subscribed too, not just a brand-new one.
     expect(member.body.status).toBe("subscribed");
+  });
+
+  it("leaves the member's status alone on opt-in when opt-in changes are not pushed", async () => {
+    const calls = mailchimp();
+
+    await accountsSync(
+      request(
+        { id: ACCOUNT_ID, $event: { type: "account.updated", data: { email_optin: true } }, email_optin: true },
+        withSyncState(account({ email_optin: true }), { remote_key: ACCOUNT_ID }),
+        { push_optout: false },
+      ),
+    );
+
+    const [member] = memberWrites(calls);
+    // Still upserted (status_if_new only), never forced to subscribed.
+    expect(member.method).toBe("PUT");
+    expect(member.body).not.toHaveProperty("status");
+  });
+
+  it("does not send a never-sent account just because it opted in, when opt-in changes are off", async () => {
+    const calls = mailchimp();
+
+    await accountsSync(
+      request(
+        { id: ACCOUNT_ID, $event: { type: "account.updated", data: { email_optin: true } }, email_optin: true },
+        account({ email_optin: true }),
+        { push_optout: false },
+      ),
+    );
+
+    expect(calls).toHaveLength(0);
   });
 
   it("asks Mailchimp to confirm by email when the member unsubscribed through Mailchimp", async () => {

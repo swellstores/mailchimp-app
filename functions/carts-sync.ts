@@ -92,15 +92,15 @@ export default async function (req: SwellRequest) {
       // `cart.abandoned` is the event the whole feature exists for, so it pushes even when
       // the cart has never been sent before — `requireExisting` would skip exactly the
       // carts Mailchimp most needs.
-      const firstPushAllowed = resync || type === 'cart.abandoned';
+      // In manual mode nothing reaches Mailchimp for the first time automatically, but a
+      // cart already there is kept current.
+      const firstPushAllowed =
+        resync || (type === 'cart.abandoned' && settings.push_trigger !== 'manual');
 
       if (type === 'cart.updated' && !resync && !hasRelevantChange('carts', changed)) {
         return;
       }
       if (!resync && !settings.event_updated) {
-        return;
-      }
-      if (!resync && settings.push_trigger === 'manual') {
         return;
       }
 
