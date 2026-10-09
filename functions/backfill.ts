@@ -56,13 +56,15 @@ import {
  * once the batch finishes, flips *that batch's* records to `synced` if
  * `errored_operations` is zero and to `error` if it is not. The stamp is what makes
  * overlapping batches safe: polling batch A settles only the records A queued, never the
- * ones batch B still has in flight. When a batch reports errors, re-run the same
- * collection in direct mode: it is idempotent, and it will name each failing record.
+ * ones batch B still has in flight. When a batch reports errors, its records are marked
+ * `error`; re-send them in direct mode with `"sync_status": "error"` — idempotent, and it
+ * names each failing record. (A plain re-run selects nothing: submission stamped their
+ * `remote_key`.)
  *
  * THERE IS NO `page` PARAMETER, by design. Every processed record leaves the selection —
- * a pushed or submitted record gains a `remote_key`, a skipped one gains a terminal
- * `sync_status` — so the records that would have been "page 2" have moved to the front by
- * the time a second call arrives. Advancing a page number over a draining selection skips
+ * a pushed or submitted record gains a `remote_key`, a skipped or failed one gains a
+ * `sync_status` the selection excludes — so the records that would have been "page 2"
+ * have moved to the front by the time a second call arrives. Advancing a page number over a draining selection skips
  * one page-worth of records per call, silently and permanently: nothing ever retries a
  * record that was never pushed. So every call selects from the front, and the caller
  * simply repeats the same call until `has_more` is false.
@@ -135,12 +137,13 @@ async function selectRecords(
   where: Record<string, unknown>,
   limit: number,
   withExpansions: boolean,
+  sort = 'date_created asc',
 ): Promise<Array<Record<string, any>>> {
   const params: Record<string, any> = {
     ...where,
     limit,
     page: 1,
-    sort: 'date_created asc',
+    sort,
   };
   if (withExpansions && RECORD_EXPAND[collection].length > 0) {
     params.expand = RECORD_EXPAND[collection];
@@ -304,34 +307,42 @@ export async function post(req: SwellRequest) {
   // A bulk run sends historical records. Without this, Mailchimp treats each one as new
   // and fires its automations: order receipts and abandoned-cart emails for purchases
   // customers made long ago. A single-record re-sync is a correction, not a backfill.
+  // If the flag cannot be set, nothing is sent: carrying on would do exactly what the flag
+  // exists to prevent. The usual cause is a store that does not exist yet (setup not run).
   let storeSyncing: boolean | undefined;
   if (!recordId) {
     try {
       await setStoreSyncing(req, settings, new MailchimpClient(settings), true);
       storeSyncing = true;
     } catch (err) {
-      console.warn(`Mailchimp: could not mark the store as syncing: ${errorText(err)}`);
-      storeSyncing = false;
+      throw new SwellError(
+        `Could not pause Mailchimp's automations for the backfill, so nothing was sent: ` +
+          `${errorText(err)}. Run setup (POST /functions/mailchimp/setup) if the Mailchimp ` +
+          'store does not exist yet, then repeat this call.',
+        { status: 502 },
+      );
     }
   }
   const statusKey = `$app.${appId(req)}.sync_status`;
   const keyKey = `$app.${appId(req)}.remote_key`;
 
-  // Default selection: everything never pushed. `remote_key` doubles as the "has this
-  // ever been pushed?" flag — but the terminal statuses must be excluded explicitly,
-  // because the skip paths record `sync_status: 'skipped'` WITHOUT a remote_key (nothing
-  // was pushed, so there is no key to record). Without the `$nin`, every guest cart and
-  // email-less account in the store would sit at the front of this selection forever.
-  // Records with no sync state at all still match: a missing field is not in the list.
+  // Default selection: everything never pushed and not yet attempted. `remote_key` doubles
+  // as the "has this ever been pushed?" flag — but the statuses a failed or skipped
+  // attempt leaves must be excluded explicitly, because those paths record a status
+  // WITHOUT a remote_key (nothing was pushed, so there is no key to record). Without the
+  // `$nin`, every guest cart and email-less account would sit at the front of this
+  // selection forever — and so would ten records that keep failing, which then pinned
+  // `has_more` at true for good. Failures are not lost: they are named in `results`, sit
+  // in the admin's "Mailchimp errors" tab, are retried by the daily check, and are re-run
+  // with `"sync_status": "error"`. Records with no sync state at all still match: a
+  // missing field is not in the list.
   //
   // Note there is deliberately no `page` here or anywhere below — see the header. The
-  // selection drains from the front as records are pushed or skipped, so callers repeat
-  // the same call until `has_more` is false. (Records whose push *fails* keep
-  // `remote_key: null` and stay in the selection; they reappear, named, in `results`
-  // until the cause is fixed — visible and retryable beats silently skipped.)
+  // selection drains from the front as records are attempted, so callers repeat the same
+  // call until `has_more` is false.
   const where: Record<string, unknown> = syncStatus
     ? { [statusKey]: syncStatus }
-    : { [keyKey]: null, [statusKey]: { $nin: ['skipped', 'canceled'] } };
+    : { [keyKey]: null, [statusKey]: { $nin: ['skipped', 'canceled', 'error'] } };
   // A converted cart is an order now. Sending it would put a cart Mailchimp's abandoned-cart
   // automation acts on into the store for a purchase that was already made, so the backfill
   // never selects one, whatever else the selection asks for. (A single `record_id` re-sync
@@ -346,11 +357,21 @@ export async function post(req: SwellRequest) {
   }
 
   // ---- direct mode ----------------------------------------------------------------------
+  // A `sync_status` re-run does not drain the way the default selection does: a record
+  // that fails again keeps its status. Least recently touched first, so each attempt's
+  // state write moves it to the back and the next call reaches the records behind it.
   const recordIds = recordId
     ? [recordId]
-    : (await selectRecords(req, collection, where, MAX_DIRECT, false)).map((r) =>
-        String(r.id),
-      );
+    : (
+        await selectRecords(
+          req,
+          collection,
+          where,
+          MAX_DIRECT,
+          false,
+          syncStatus ? 'date_updated asc' : undefined,
+        )
+      ).map((r) => String(r.id));
 
   const results: PushResult[] = [];
   for (const id of recordIds) {
@@ -359,12 +380,20 @@ export async function post(req: SwellRequest) {
     try {
       results.push(await pushRecord(req, settings, collection, id));
     } catch (err) {
+      const message = errorText(err);
+      // Recorded, so the record leaves the default selection and shows in the errors tab
+      // like any other failure, rather than holding the front of the queue unseen.
+      await recordSyncState(req, collection, id, {
+        sync_status: 'error',
+        last_error: message,
+        resync_requested: false,
+      });
       results.push({
         collection,
         recordId: id,
         ok: false,
         action: 'error',
-        message: errorText(err),
+        message,
         retryable: true,
       });
     }
@@ -372,23 +401,35 @@ export async function post(req: SwellRequest) {
 
   // Response bodies over 75 KB are silently dropped by the platform, which is why each
   // call is bounded and the caller repeats rather than asking for everything at once.
-  const hasMore = !recordId && recordIds.length === MAX_DIRECT;
+  // A full page means there is probably more behind it — except on a `sync_status`
+  // re-run where every record failed again: nothing left the selection, so repeating
+  // would only cycle the same failures. Stop there and let the operator fix the cause.
+  const fullPage = !recordId && recordIds.length === MAX_DIRECT;
+  const stalled = fullPage && Boolean(syncStatus) && results.every((result) => !result.ok);
+  const hasMore = fullPage && !stalled;
   return {
     ok: results.every((result) => result.ok),
     mode: 'direct',
     collection,
     requested: recordIds.length,
     pushed: results.filter((result) => result.action === 'pushed').length,
-    // A full page means there is probably more behind it.
+    failed: results.filter((result) => !result.ok).length,
     has_more: hasMore,
     store_syncing: storeSyncing,
-    message: hasMore
-      ? 'More records match. Repeat the exact same call until has_more is false — the ' +
-        'selection drains from the front as records are pushed or skipped, so there is ' +
-        'no page to advance.'
-      : recordId
-        ? 'Requested record processed — see results.'
-        : 'Nothing further matches this selection.',
+    message: stalled
+      ? `Every record in this page failed again. Fix the cause shown in results, then ` +
+        `repeat this call; more records with sync_status "${syncStatus}" may be waiting.`
+      : hasMore
+        ? 'More records match. Repeat the exact same call until has_more is false — the ' +
+          'selection drains from the front as records are attempted, so there is no page ' +
+          'to advance.'
+        : recordId
+          ? 'Requested record processed — see results.'
+          : 'Nothing further matches this selection.' +
+            (results.some((result) => !result.ok)
+              ? ` Records that failed are marked "error"; fix the cause, then re-run them ` +
+                `with {"collection":"${collection}","sync_status":"error"}.`
+              : ''),
     results,
   };
 }
@@ -464,6 +505,12 @@ async function submitBatch(
   // the ONLY tie between these records and this submission: `pollBatch` settles by batch id,
   // never by bare 'pending', so an operator can submit a second batch before polling the
   // first and each poll still touches only its own records.
+  // Accounts also record the address the member was written under. The direct path finds
+  // an existing member by `remote_email` when the address later changes; without it, an
+  // email change after a batch backfill created a second member.
+  const emails = new Map(
+    records.map((record) => [String(record.id), String(record.email ?? '').trim()]),
+  );
   await mapChunked(queued, WRITE_CONCURRENCY, (id) =>
     recordSyncState(req, collection, id, {
       sync_status: 'pending',
@@ -471,6 +518,7 @@ async function submitBatch(
       batch_id: batch.id,
       last_error: null,
       resync_requested: false,
+      ...(collection === 'accounts' && emails.get(id) ? { remote_email: emails.get(id) } : {}),
     }),
   );
 
@@ -544,17 +592,24 @@ async function pollBatch(
     false,
   );
 
+  // How to find the failures again. Submission stamped these records' `remote_key`, so the
+  // default never-pushed selection no longer matches them; the 'error' status does.
+  const rerun = `{"collection":"${collection}","sync_status":"error"}`;
   const now = new Date().toISOString();
   await mapChunked(pending, WRITE_CONCURRENCY, (record) =>
     recordSyncState(req, collection, String(record.id), {
       sync_status: errored > 0 ? 'error' : 'synced',
-      remote_id: String(record.id),
+      // An account's remote_id is its audience member's id (the hash of its address),
+      // which this app cannot compute; the next direct push records it. Every other
+      // collection's Mailchimp id is the Swell id.
+      ...(collection === 'accounts' ? {} : { remote_id: String(record.id) }),
       last_synced_at: errored > 0 ? null : now,
       last_error:
         errored > 0
           ? `Mailchimp batch ${batchId} finished with ${errored} errored operation(s). ` +
             'Per-operation detail is only available as a gzipped archive, which this app ' +
-            'cannot read — re-run this collection in direct mode to find the failures.'
+            `cannot read. Re-send this batch's records in direct mode with ${rerun} to find ` +
+            'the failures.'
           : null,
     }),
   );
@@ -576,7 +631,8 @@ async function pollBatch(
     has_more: hasMore,
     message:
       (errored > 0
-        ? `Batch finished with ${errored} errored operation(s). Re-run this collection in direct mode to identify them.`
+        ? `Batch finished with ${errored} errored operation(s). Its records are now marked "error": ` +
+          `re-send them in direct mode with ${rerun} to identify the failures.`
         : `Batch finished cleanly. Settled ${pending.length} record(s).`) +
       (hasMore
         ? ' More of this batch\'s records are still pending — repeat the same poll until has_more is false.'

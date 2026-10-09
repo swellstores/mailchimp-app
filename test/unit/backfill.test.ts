@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { post as backfill } from "../../functions/backfill";
 import { createMockRequest } from "../helpers/mock-request";
 import {
+  ACCOUNT_ID,
   PRODUCT_ID,
+  account,
   jsonResponse,
+  mailchimpError,
   listResponse,
   product,
   withSyncState,
@@ -91,7 +94,7 @@ describe("backfill selection", () => {
     const params = get.mock.calls[0][1] as Record<string, any>;
     expect(params["$app.mailchimp.remote_key"]).toBeNull();
     expect(params["$app.mailchimp.sync_status"]).toEqual({
-      $nin: ["skipped", "canceled"],
+      $nin: ["skipped", "canceled", "error"],
     });
     expect(response.has_more).toBe(false);
   });
@@ -313,5 +316,207 @@ describe("store syncing flag", () => {
     expect(response).toMatchObject({ ok: true, store_syncing: false });
     const [patch] = storeCalls(fetchMock);
     expect(JSON.parse(String(patch.init?.body))).toEqual({ is_syncing: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Direct mode drains past records that keep failing
+// ---------------------------------------------------------------------------
+
+/**
+ * A tiny in-memory collection that honours the where clauses the route sends, and applies
+ * the route's `$app` writes, so a sequence of calls behaves the way it would on a store.
+ */
+function memoryStore(records: Array<Record<string, any>>) {
+  const byId = new Map(records.map((r) => [String(r.id), structuredClone(r)]));
+  const stateOf = (r: Record<string, any>) => r.$app?.mailchimp ?? {};
+  const matches = (r: Record<string, any>, where: Record<string, any>) =>
+    Object.entries(where).every(([key, cond]) => {
+      if (["limit", "page", "sort", "expand", "include", "id"].includes(key)) return true;
+      const value = key.startsWith("$app.mailchimp.")
+        ? stateOf(r)[key.slice("$app.mailchimp.".length)]
+        : r[key];
+      if (cond && typeof cond === "object" && "$nin" in cond) return !cond.$nin.includes(value);
+      if (cond === null) return value == null;
+      return value === cond;
+    });
+
+  const get: GetFn = async (url, params = {}) => {
+    const single = url.match(/^\/\w+\/\{id\}$/);
+    if (single) return byId.get(String(params.id)) ?? null;
+    const hits = [...byId.values()].filter((r) => matches(r, params));
+    return listResponse(hits.slice(0, params.limit ?? 25));
+  };
+  const put: PutFn = async (url, body) => {
+    const record = byId.get(url.split("/").pop() as string);
+    if (record) {
+      record.$app = { mailchimp: { ...stateOf(record), ...body.$app.mailchimp } };
+    }
+    return {};
+  };
+  return { get, put, byId };
+}
+
+describe("direct-mode pagination", () => {
+  it("moves past ten records that keep failing, so has_more eventually turns false", async () => {
+    // Ten failing records used to keep `remote_key: null`, stay first in line, and pin
+    // has_more at true: the caller repeated the same call forever and the records behind
+    // them were never sent.
+    const failing = Array.from({ length: 10 }, (_, i) => product({ id: `bad_${i}` }));
+    const good = [product({ id: "good_1" }), product({ id: "good_2" })];
+    const store = memoryStore([...failing, ...good]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "PUT" && url.includes("/products/bad_")) {
+        return jsonResponse(400, mailchimpError(400, "Invalid resource"));
+      }
+      return jsonResponse(200, { id: url.split("/").pop() });
+    };
+
+    const responses: Array<Record<string, any>> = [];
+    for (let call = 0; call < 5; call += 1) {
+      const { req, put } = harness({ body: { collection: "products" }, get: store.get, fetchImpl });
+      put.mockImplementation(store.put);
+      const response: Record<string, any> = await backfill(req);
+      responses.push(response);
+      if (!response.has_more) break;
+    }
+
+    expect(responses.map((r) => r.has_more)).toEqual([true, false]);
+    expect(responses[1].pushed).toBe(2);
+    expect(store.byId.get("good_1")?.$app.mailchimp.sync_status).toBe("synced");
+    expect(store.byId.get("bad_0")?.$app.mailchimp.sync_status).toBe("error");
+    // The failures are not lost: the last call says how to re-run them.
+    expect(responses.at(-1)?.message ?? "").not.toContain("sync_status");
+  });
+
+  it("records an unexpected throw as an error so the record leaves the selection", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const store = memoryStore([product({ id: "boom" })]);
+    const { req, put } = harness({
+      body: { collection: "products" },
+      get: async (url, params) => {
+        if (url.includes("{id}")) throw new Error("Swell read failed");
+        return store.get(url, params);
+      },
+    });
+    put.mockImplementation(store.put);
+
+    const response: Record<string, any> = await backfill(req);
+
+    expect(response.failed).toBe(1);
+    expect(store.byId.get("boom")?.$app.mailchimp).toMatchObject({
+      sync_status: "error",
+      last_error: "Swell read failed",
+    });
+    expect(response.message).toContain('"sync_status":"error"');
+  });
+
+  it("stops a sync_status re-run whose whole page fails again instead of cycling it", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failing = Array.from({ length: 10 }, (_, i) =>
+      withSyncState(product({ id: `bad_${i}` }), { sync_status: "error", remote_key: null }),
+    );
+    const store = memoryStore(failing);
+    const { req, put, get } = harness({
+      body: { collection: "products", sync_status: "error" },
+      get: store.get,
+      fetchImpl: async (_input, init) =>
+        init?.method === "PATCH"
+          ? jsonResponse(200, { id: "test-store" })
+          : jsonResponse(400, mailchimpError(400, "Invalid resource")),
+    });
+    put.mockImplementation(store.put);
+
+    const response: Record<string, any> = await backfill(req);
+
+    expect(response.has_more).toBe(false);
+    expect(response.message).toMatch(/failed again/);
+    // Least recently touched first, so a repeat reaches the records behind these.
+    const listCall = get.mock.calls.find(([url]) => url === "/products");
+    expect(listCall?.[1]?.sort).toBe("date_updated asc");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Batch errors can be found again, and accounts keep their address
+// ---------------------------------------------------------------------------
+
+describe("batch error recovery", () => {
+  it("tells the operator to re-run with sync_status error, which the poll's records match", async () => {
+    const pending = withSyncState(product({ id: "prod_a" }), {
+      sync_status: "pending",
+      remote_key: "prod_a",
+      batch_id: "batch_A",
+    });
+    const { req, put } = harness({
+      body: { batch_id: "batch_A", collection: "products" },
+      get: async () => listResponse([pending]),
+      fetchImpl: async () =>
+        jsonResponse(200, { id: "batch_A", status: "finished", errored_operations: 1 }),
+    });
+
+    const response: Record<string, any> = await backfill(req);
+
+    const hint = '{"collection":"products","sync_status":"error"}';
+    expect(response.message).toContain(hint);
+    expect(put.mock.calls[0][1].$app.mailchimp.last_error).toContain(hint);
+    expect(put.mock.calls[0][1].$app.mailchimp.sync_status).toBe("error");
+  });
+
+  it("records the member's address on submit and leaves an account's remote_id alone on poll", async () => {
+    // remote_email is how a later email change finds the existing member. Without it the
+    // direct path creates a second member at the new address.
+    const submit = harness({
+      body: { collection: "accounts", mode: "batch" },
+      get: async () => listResponse([account({ email: " Ada@Example.com " })]),
+    });
+    await backfill(submit.req);
+    expect(submit.put.mock.calls[0][1].$app.mailchimp).toMatchObject({
+      sync_status: "pending",
+      remote_email: "Ada@Example.com",
+    });
+
+    const poll = harness({
+      body: { batch_id: "batch_A", collection: "accounts" },
+      get: async () =>
+        listResponse([
+          withSyncState(account(), { sync_status: "pending", remote_key: ACCOUNT_ID, batch_id: "batch_A" }),
+        ]),
+      fetchImpl: async () => jsonResponse(200, { id: "batch_A", status: "finished", errored_operations: 0 }),
+    });
+    await backfill(poll.req);
+    const settled = poll.put.mock.calls[0][1].$app.mailchimp;
+    expect(settled.sync_status).toBe("synced");
+    // The member's id is the hash of its address, not the Swell id.
+    expect(settled).not.toHaveProperty("remote_id");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. No backfill without automations paused
+// ---------------------------------------------------------------------------
+
+describe("store syncing failure", () => {
+  it("stops before sending anything when the store cannot be marked as syncing", async () => {
+    const calls: string[] = [];
+    const { req, get, put } = harness({
+      body: { collection: "products", mode: "batch" },
+      get: async () => listResponse([product()]),
+      fetchImpl: async (input, init) => {
+        calls.push(`${init?.method} ${String(input)}`);
+        return jsonResponse(404, mailchimpError(404, "Resource Not Found"));
+      },
+    });
+
+    await expect(backfill(req)).rejects.toThrow(/nothing was sent/);
+    // Only the failed store PATCH: no batch, no record read, no state write.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/^PATCH .*\/ecommerce\/stores\/test-store$/);
+    expect(get).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
   });
 });
