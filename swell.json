@@ -5,6 +5,9 @@
 	"type": "integration",
 	"version": "1.4.1",
 	"permissions": [],
+	"integrations": [
+		"mailchimp"
+	],
 	"support_email": "support@swell.is",
 	"documentation_url": "https://developers.swell.is/app-guides/mailchimp",
 	"price_external": true,

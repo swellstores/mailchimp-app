@@ -380,5 +380,5 @@ export async function nativeIntegrationEnabled(req: SwellRequest): Promise<boole
 }
 
 export const NATIVE_INTEGRATION_WARNING =
-  "Swell's built-in Mailchimp integration is still on (Settings → Integrations). Turn it off, " +
+  "Swell's built-in Mailchimp integration is still on (Integrations). Turn it off, " +
   'or customers and orders reach Mailchimp twice.';

@@ -234,8 +234,14 @@ export async function post(req: SwellRequest) {
 
   const callback = await webhookCallbackUrl(req, settings);
 
+  // Reported here as well as by GET, because this is the call an installer actually runs.
+  // Advisory: it does not fail the setup.
+  const native = await nativeIntegrationEnabled(req);
+
   return {
     ok: steps.every((step) => step.ok),
+    ...(native ? { warning: NATIVE_INTEGRATION_WARNING } : {}),
+    native_integration_enabled: native,
     store_id: storeId(req, settings),
     list_id: settings.list_id,
     api_base: client.apiBase,
