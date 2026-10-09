@@ -37,12 +37,20 @@ function stubMailchimp(store: Record<string, any>) {
   return calls;
 }
 
-function request(options: { outstanding?: boolean; nativeEnabled?: boolean } = {}) {
-  const get = vi.fn(async (url: string, _query?: Record<string, any>) => {
+function request(
+  options: { outstanding?: boolean; nativeEnabled?: boolean; unsent?: boolean } = {},
+) {
+  const get = vi.fn(async (url: string, query?: Record<string, any>) => {
     if (url === "/settings/integrations/services/mailchimp") {
       return { enabled: options.nativeEnabled ?? false };
     }
-    return { results: options.outstanding ? [{ id: "x" }] : [] };
+    const status = query?.["$app.mailchimp.sync_status"];
+    // `outstanding`: records waiting on a batch. `unsent`: records never sent at all,
+    // such as old carts, which a never-pushed selection would match.
+    if (status === "pending" || status?.$in) {
+      return { results: options.outstanding ? [{ id: "x" }] : [] };
+    }
+    return { results: options.unsent ? [{ id: "old_cart" }] : [] };
   });
   const req = createMockRequest({
     appId: "mailchimp",
@@ -78,7 +86,18 @@ describe("reconcile", () => {
     expect(syncingOff(calls)).toBe(true);
   });
 
-  it("keeps store syncing on while records are still waiting to be sent", async () => {
+  it("ends the backfill even though old records were never sent", async () => {
+    // Old carts are never sent, so waiting for "nothing unsent" kept automations paused
+    // for good. Only a batch still in flight runs outside a backfill call.
+    const calls = stubMailchimp({ id: "test-store", list_id: "a6b5da1054", is_syncing: true });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await reconcile(request({ unsent: true }).req);
+
+    expect(syncingOff(calls)).toBe(true);
+  });
+
+  it("keeps store syncing on while records are waiting on a batch", async () => {
     const calls = stubMailchimp({ id: "test-store", list_id: "a6b5da1054", is_syncing: true });
     vi.spyOn(console, "log").mockImplementation(() => {});
 

@@ -133,11 +133,11 @@ export default async function (req: SwellRequest) {
 
   // ---- 4. End a finished backfill -------------------------------------------------------
   // A backfill turns Mailchimp's `is_syncing` on to keep automations quiet. If nobody ran
-  // the backfill's `finish` action, turn it off here once nothing is left to send, so live
-  // receipts and abandoned-cart emails are not suppressed indefinitely.
+  // the backfill's `finish` action, turn it off here once no batch is still in flight, so
+  // live receipts and abandoned-cart emails are not suppressed indefinitely.
   try {
     const store = await client.getStore(storeId(req, settings));
-    if (store?.is_syncing === true && !(await backfillOutstanding(req, settings))) {
+    if (store?.is_syncing === true && !(await batchInFlight(req, settings))) {
       await setStoreSyncing(req, settings, client, false);
       console.log('Mailchimp: backfill complete; turned store syncing off so automations run again.');
     }
@@ -147,27 +147,29 @@ export default async function (req: SwellRequest) {
 }
 
 /**
- * True while any enabled collection still has a record the backfill would send (never
- * pushed and not skipped) or one waiting on a Mailchimp batch. One row per collection is
- * enough to answer; these are collection scans, so nothing more is read.
+ * True while any enabled collection has a record waiting on a Mailchimp batch.
+ *
+ * That is the only part of a backfill that runs outside a backfill call: direct mode sends
+ * synchronously, and every bulk call turns `is_syncing` back on before it sends anything.
+ * So once no batch is pending, switching automations back on cannot expose a historical
+ * record, and a backfill resumed later re-protects itself.
+ *
+ * This used to wait until no record anywhere was unsent, which in practice never happened:
+ * old carts, carts outside the "abandoned only" scope and records created while syncing
+ * was off are never sent, so automations stayed paused for good.
  */
-async function backfillOutstanding(
+async function batchInFlight(
   req: SwellRequest,
   settings: Awaited<ReturnType<typeof getSettings>>,
 ): Promise<boolean> {
   const statusKey = `$app.${appId(req)}.sync_status`;
-  const keyKey = `$app.${appId(req)}.remote_key`;
   for (const collection of SYNC_COLLECTIONS) {
     if (!collectionEnabled(settings, collection)) continue;
-    for (const where of [
-      { [keyKey]: null, [statusKey]: { $nin: ['skipped', 'canceled', 'error'] } },
-      { [statusKey]: 'pending' },
-    ]) {
-      const response = (await req.swell.get(`/${collection}`, { ...where, limit: 1 } as any)) as {
-        results?: unknown[];
-      } | null;
-      if ((response?.results ?? []).length > 0) return true;
-    }
+    const response = (await req.swell.get(`/${collection}`, {
+      [statusKey]: 'pending',
+      limit: 1,
+    } as any)) as { results?: unknown[] } | null;
+    if ((response?.results ?? []).length > 0) return true;
   }
   return false;
 }

@@ -274,8 +274,8 @@ export async function post(req: SwellRequest) {
   >;
 
   // Ends a backfill: lets Mailchimp run automations again. Run it once every collection
-  // reports `has_more: false`. The daily reconcile also does this on its own once nothing
-  // is left to send, so a forgotten call cannot leave automations off for good.
+  // reports `has_more: false`. The daily reconcile also does this on its own once no batch
+  // is still pending, so a forgotten call cannot leave automations off for good.
   if (text(body.action) === 'finish') {
     await setStoreSyncing(req, settings, new MailchimpClient(settings), false);
     return { ok: true, store_syncing: false, message: 'Backfill finished; Mailchimp automations are active again.' };
