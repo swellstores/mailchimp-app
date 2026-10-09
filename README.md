@@ -27,14 +27,17 @@ adds opted-in email addresses to an audience.
 
 **What it does.** Each customer account becomes a Mailchimp ecommerce customer and an
 audience member with first name, last name and phone. A customer who opted in to marketing
-is subscribed; one who didn't is added as *transactional*, which is what lets order emails
-and purchase history work for them without marketing to them.
+is subscribed. One with no answer is added as *transactional*, which is what lets order
+emails and purchase history work for them without marketing to them. One who opted out is
+unsubscribed if they're already in the audience, and otherwise isn't added as a member.
 
 - **Opting in** in Swell subscribes them in Mailchimp, even if they had been removed or were
-  never sent before. Someone who unsubscribed through Mailchimp can't be re-subscribed by an
-  app, so they're set to *pending* and Mailchimp emails them to confirm.
-- **Opting out** in Swell unsubscribes them (**Push opt-in changes to Mailchimp**). Only an
-  explicit opt-out does this; an account that simply has no answer is left alone.
+  never sent before (**Push opt-in changes to Mailchimp**). Someone who unsubscribed through
+  Mailchimp can't be re-subscribed by an app, so they're set to *pending* and Mailchimp
+  emails them to confirm. With the setting off, an opt-in leaves an existing member's status
+  alone.
+- **Opting out** in Swell unsubscribes them (same setting). Only an explicit opt-out does
+  this; an account that simply has no answer is left alone.
 - **Changing email address** in Swell updates the existing member rather than creating a
   second one.
 - **Deleting an account** archives the member in Mailchimp (**Archive audience member when
@@ -58,6 +61,8 @@ recommend them.
 **What it does.** Carts are sent with their items and checkout link, which is what
 Mailchimp's abandoned-cart automation emails. The moment a cart becomes an order it is
 removed from Mailchimp, so nobody gets an abandoned-cart email for something they bought.
+A cart that has an order is never sent again, whichever event, re-sync or backfill touches
+it afterwards.
 **Which carts to sync** can limit this to carts Swell has marked abandoned.
 
 **How it's built.** `functions/carts-sync.ts`.
@@ -67,6 +72,9 @@ removed from Mailchimp, so nobody gets an abandoned-cart email for something the
 **What it does.** Orders are sent with their items, totals, discounts, and payment and
 fulfillment status, which is what Mailchimp's order notification and post-purchase
 automations, and its purchase-based segments, use.
+
+A canceled order stays in Mailchimp with a *cancelled* financial status, so it keeps
+showing as Synced.
 
 **How it's built.** `functions/orders-sync.ts` on submission and on the status changes those
 automations key on.
@@ -89,8 +97,10 @@ change a customer's account (see *Limits*).
 
 **What it does.** Sends everything that already exists, in bulk, when the app is first set
 up. While it runs, Mailchimp is told a bulk sync is in progress, which stops its automations
-emailing customers about old orders and carts. That's switched off again when the backfill
-is finished, or by the daily check once there's nothing left to send.
+emailing customers about old orders and carts; if that can't be set, the backfill stops
+without sending anything. It's switched off again by the backfill's `finish` call, or by the
+daily check once no bulk batch is still waiting on Mailchimp. Each backfill call switches it
+back on before sending, so a backfill spread over several days stays covered.
 
 **How it's built.** `functions/backfill.ts`, a private route; see *Setup*.
 
@@ -118,8 +128,8 @@ app's own namespace on each record.
 **What it does.** Switch on **Re-sync on save** in a record's Mailchimp tab and save to send
 it again. Once a day the app checks the Mailchimp store and webhook are still set up,
 retries a few failed records per collection (least recently tried first, so one that keeps
-failing doesn't block the rest), ends a finished backfill, and logs a warning if the
-built-in Mailchimp integration is still on.
+failing doesn't block the rest), ends a backfill whose `finish` call was forgotten once no
+batch is pending, and logs a warning if the built-in Mailchimp integration is still on.
 
 **How it's built.** `functions/reconcile.ts`, a daily cron.
 
@@ -137,9 +147,9 @@ built-in Mailchimp integration is still on.
 ### Install and configure
 
 1. Install **Mailchimp** from the Swell App Store.
-2. **Turn off the built-in Mailchimp integration** (Settings → Integrations) if it's on, or
-   customers reach Mailchimp twice. The app's setup report and daily check warn if it's
-   still on.
+2. **Turn off the built-in Mailchimp integration** (Integrations) if it's on, or customers
+   reach Mailchimp twice. Installing the app offers to turn it off for you, and setup
+   (`GET` and `POST`) and the daily check warn if it's still on.
 3. Open **Apps → Mailchimp → Settings**, fill in the settings below, and switch on **Enable
    Mailchimp sync**. At minimum: API key, Audience ID, store name, and storefront domain.
 4. Run setup once with the store's secret API key. It checks the key, creates the Mailchimp
@@ -154,8 +164,10 @@ built-in Mailchimp integration is still on.
    includes a webhook signing secret, paste it into **Webhook signing secret**; Mailchimp
    shows it only once.
 5. Send existing data, products first, since Mailchimp rejects carts and orders that name
-   products it hasn't seen. Then accounts, orders and carts. Repeat each call until it
-   answers `"has_more": false`:
+   products it hasn't seen. Then accounts, orders and carts (carts that became orders are
+   left out). Repeat each call until it answers `"has_more": false`. A record that fails is
+   marked *Error* and the run moves past it; once the cause is fixed, send the failures again
+   with `"sync_status":"error"` in place of the plain call:
 
    ```bash
    curl -X POST "https://<store-id>.swell.store/functions/mailchimp/backfill" \
@@ -165,6 +177,8 @@ built-in Mailchimp integration is still on.
 
    Add `"mode":"batch"` for large catalogues: it sends 25 at a time through Mailchimp's
    batch API and returns a `batch_id` to check with `{"collection":"products","batch_id":"…"}`.
+   If a batch reports errors, its records are marked *Error*; re-send them with
+   `{"collection":"products","sync_status":"error"}` (direct mode) to see which failed.
    When every collection is done, let Mailchimp's automations run again:
 
    ```bash
@@ -173,7 +187,7 @@ built-in Mailchimp integration is still on.
      -d '{"action":"finish"}'
    ```
 
-   If you forget, the daily check does it once nothing is left to send.
+   If you forget, the daily check does it once no batch is still pending.
 
 ### Settings
 
@@ -187,8 +201,8 @@ built-in Mailchimp integration is still on.
 | Store name | Swell store id | Shown in Mailchimp's reports. |
 | Store currency | `USD` | The store's reporting currency in Mailchimp. Orders and carts carry their own. |
 | Storefront domain | — | Used to build product and checkout links. |
-| Push records to Mailchimp | Automatically | Or manual only, sending records only through backfill and re-sync. |
-| Sync customer accounts | On | Customers and audience members. |
+| Push records to Mailchimp | Automatically | When a record is first sent. Manual sends a record for the first time only through the backfill or **Re-sync on save**; records already in Mailchimp still get their edits, order status changes and opt-outs. |
+| Sync customer accounts | On | Customers and audience members: subscribed if opted in, transactional with no answer, unsubscribed (or not added) if opted out. |
 | Sync products | On | Products and variants. Carts and orders need this. |
 | Sync carts | On | For abandoned-cart emails. |
 | Which carts to sync | All active carts | Or only carts Swell has marked abandoned, which makes the email fire later. |
@@ -196,7 +210,7 @@ built-in Mailchimp integration is still on.
 | Sync new records | On | Send records when they're created or submitted. |
 | Sync edits | On | Re-send records when they change. |
 | Sync deletions | Off | Permanently delete products, carts and orders from Mailchimp when they're deleted in Swell. Mailchimp can't undo this. Converted carts are always removed regardless. |
-| Push opt-in changes to Mailchimp | On | Subscribe or unsubscribe the member when the customer's marketing opt-in changes in Swell. |
+| Push opt-in changes to Mailchimp | On | Subscribe or unsubscribe the member when the customer's marketing opt-in changes in Swell. Needs **Sync edits**. When off, an existing member's status is left alone. |
 | Archive audience member when an account is deleted | On | Archive (not delete) the member when the Swell account is deleted. |
 | Webhook secret | — | Any random string of 16+ characters. Added to the webhook address and required for test payloads. See *Limits*. |
 | Webhook signing secret | — | Optional. Shown once by Mailchimp when the webhook is created. |
@@ -219,14 +233,15 @@ built-in Mailchimp integration is still on.
 
 ## Limits and known issues
 
-- **Every synced customer counts as a Mailchimp contact**, opted in or not. That's how
-  Mailchimp's ecommerce data works: a customer who declined marketing is still a
+- **Synced customers count as Mailchimp contacts**, opted in or not. That's how
+  Mailchimp's ecommerce data works: a customer who never answered is still a
   *transactional* contact, which is what makes order emails possible. On Mailchimp plans
   priced by total contacts this raises the count. The alternative is to switch off **Sync
   customer accounts**, though carts and orders still create customers.
 - **An account with no opt-in answer is not subscribed.** The built-in integration
   subscribed anyone who hadn't explicitly declined. This app subscribes only customers who
-  opted in; the rest are transactional.
+  opted in; those with no answer are transactional, and those who opted out are
+  unsubscribed.
 - **Unsubscribes come back to Swell on the live environment only.** Mailchimp can only reach
   a store's live environment.
 - **How incoming changes are verified.** Swell currently drops the query string from calls
@@ -325,8 +340,9 @@ Things worth knowing before changing the code:
   Errors at high volume can arrive with no body.
 - **Batch results can't be read per record.** Mailchimp publishes them as a gzipped tar,
   which the Workers runtime can't open, so batch mode reads counts only and stamps each
-  record with its batch id. When a batch reports errors, re-run that collection in direct
-  mode to see which records failed.
+  record with its batch id. When a batch reports errors its records are marked `error`;
+  re-send them in direct mode with `"sync_status":"error"` to see which failed. A plain
+  re-run selects nothing, because submission already stamped their `remote_key`.
 - **Members are addressed by email.** The API also accepts the address instead of its MD5,
   which is what the app sends; the Workers runtime has no MD5.
 - **No npm runtime dependencies**, deliberately: everything is `fetch`, `crypto.subtle` and
