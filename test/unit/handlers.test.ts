@@ -208,6 +208,69 @@ describe("carts-sync", () => {
     expect(init.method).toBe("POST");
   });
 
+  it("never re-creates a converted cart when cart.updated lands after the conversion's DELETE", async () => {
+    // THE CONVERSION RACE. `order_id` is a watched cart field, so the write that fires
+    // cart.converted also fires cart.updated. If that update's push arrives after
+    // cart.converted's DELETE, a PATCH answers 404 and upsertCart's fallback POSTs the
+    // cart back, re-arming the abandoned-cart email for a purchase that was made.
+    const calls: Array<{ method: string; url: string }> = [];
+    const { req, swell } = harness({
+      data: {
+        id: CART_ID,
+        order_id: RECORD_ID,
+        $event: { type: "cart.updated", data: { order_id: RECORD_ID } },
+      },
+      record: withSyncState(cart({ order_id: RECORD_ID }), { remote_key: CART_ID }),
+      fetchImpl: async () => jsonResponse(404, mailchimpError(404, "not found")),
+    });
+    (globalThis.fetch as any).mockImplementation(async (url: string, init: RequestInit) => {
+      calls.push({ method: String(init.method), url });
+      return jsonResponse(404, mailchimpError(404, "not found"));
+    });
+
+    await cartsSync(req);
+
+    // Only ever a DELETE: no PATCH, and above all no POST.
+    expect(calls.map((c) => c.method)).toEqual(["DELETE"]);
+    expect(calls[0].url).toContain(`/carts/${CART_ID}`);
+    expect(swell.put.mock.calls.at(-1)?.[1].$app.mailchimp.sync_status).toBe("canceled");
+  });
+
+  it("removes a converted cart instead of pushing it when the update lands first", async () => {
+    const { req, fetchMock } = harness({
+      data: {
+        id: CART_ID,
+        order_id: RECORD_ID,
+        $event: { type: "cart.updated", data: { order_id: RECORD_ID } },
+      },
+      record: withSyncState(cart({ order_id: RECORD_ID }), { remote_key: CART_ID }),
+      fetchImpl: async () => new Response(null, { status: 204 }),
+    });
+
+    await cartsSync(req);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((fetchMock.mock.calls[0] as any)[1].method).toBe("DELETE");
+  });
+
+  it("stamps a never-sent converted cart canceled on re-sync without calling Mailchimp", async () => {
+    const { req, fetchMock, swell } = harness({
+      data: {
+        id: CART_ID,
+        $event: {
+          type: "cart.updated",
+          data: { $app: { mailchimp: { resync_requested: true } } },
+        },
+      },
+      record: cart({ order_id: RECORD_ID }),
+    });
+
+    await cartsSync(req);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(swell.put.mock.calls[0][1].$app.mailchimp.sync_status).toBe("canceled");
+  });
+
   it("skips live cart traffic when the scope is abandoned-only", async () => {
     const { req, fetchMock } = harness({
       data: { id: "cart_1", $event: { type: "cart.updated", data: { items: [] } } },

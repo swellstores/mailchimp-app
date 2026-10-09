@@ -332,6 +332,13 @@ export async function post(req: SwellRequest) {
   const where: Record<string, unknown> = syncStatus
     ? { [statusKey]: syncStatus }
     : { [keyKey]: null, [statusKey]: { $nin: ['skipped', 'canceled'] } };
+  // A converted cart is an order now. Sending it would put a cart Mailchimp's abandoned-cart
+  // automation acts on into the store for a purchase that was already made, so the backfill
+  // never selects one, whatever else the selection asks for. (A single `record_id` re-sync
+  // of one goes through `pushRecord`, which removes it from Mailchimp instead.)
+  if (collection === 'carts') {
+    where.order_id = null;
+  }
 
   if (text(body.mode) === 'batch' && !recordId) {
     const submitted = await submitBatch(req, settings, collection, where, body);

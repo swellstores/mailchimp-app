@@ -8,7 +8,7 @@
       "label": "Mailchimp sync status",
       "enum": ["pending", "synced", "error", "skipped", "canceled"],
       "private": true,
-      "description": "pending: queued, or submitted in a batch that has not finished. synced: accepted by Mailchimp. error: last push failed, see last_error. skipped: Mailchimp will not accept the cart and retrying cannot help — a guest cart with no account, or a cart with no items. canceled: the cart was deleted from Mailchimp, which is what happens the moment it converts to an order."
+      "description": "pending: queued, or submitted in a batch that has not finished. synced: accepted by Mailchimp. error: last push failed, see last_error. skipped: Mailchimp will not accept the cart and retrying cannot help — a guest cart with no account, or a cart with no items. canceled: the cart became an order (or was deleted), so it was removed from Mailchimp, or never sent if it had not been yet."
     },
     "remote_key": {
       "type": "string",

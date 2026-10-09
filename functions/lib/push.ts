@@ -52,6 +52,7 @@ export type PushAction =
   | 'skipped_no_items'
   | 'skipped_guest'
   | 'skipped_no_email'
+  | 'skipped_converted'
   | 'error';
 
 export interface PushResult {
@@ -392,6 +393,16 @@ export async function pushRecord(
     };
   }
 
+  // A cart that has become an order must never be (re)created in Mailchimp. The update
+  // that sets `order_id` fires `cart.updated` alongside `cart.converted`, and if that push
+  // lands after the conversion's DELETE, `upsertCart` takes its 404 fallback and POSTs the
+  // cart straight back — re-arming the abandoned-cart email for a purchase that was made.
+  // Checked here rather than in the handler so the backfill, the daily retry and a manual
+  // re-sync are covered too.
+  if (collection === 'carts' && isConvertedCart(record)) {
+    return settleConvertedCart(req, settings, recordId, state);
+  }
+
   const origin = storefrontOrigin(req, settings);
 
   let payload: Record<string, any>;
@@ -453,6 +464,44 @@ export async function pushRecord(
   } catch (err) {
     return failure(req, settings, client, base, err);
   }
+}
+
+/** A cart Swell has turned into an order. `order_id` is set by the conversion itself. */
+export function isConvertedCart(record: Record<string, any> | null | undefined): boolean {
+  return Boolean(record?.order_id);
+}
+
+/**
+ * The push path's answer to a converted cart: make sure Mailchimp does not have it.
+ *
+ * A cart that was sent (`remote_key` set) is deleted, exactly as `cart.converted` does —
+ * idempotent, so it does not matter which of the two lands first. One that was never sent
+ * costs no Mailchimp call; it is stamped 'canceled' so it leaves every retry selection.
+ */
+async function settleConvertedCart(
+  req: SwellRequest,
+  settings: MailchimpSettings,
+  recordId: string,
+  state: SyncState,
+): Promise<PushResult> {
+  if (state.remote_key) {
+    const result = await deleteRecord(req, settings, 'carts', recordId);
+    return result.ok
+      ? { ...result, action: 'skipped_converted', message: 'Cart became an order; removed from Mailchimp.' }
+      : result;
+  }
+  await recordSyncState(req, 'carts', recordId, {
+    sync_status: 'canceled',
+    last_error: null,
+    resync_requested: false,
+  });
+  return {
+    collection: 'carts',
+    recordId,
+    ok: true,
+    action: 'skipped_converted',
+    message: 'Cart became an order, so it is not sent to Mailchimp.',
+  };
 }
 
 /**

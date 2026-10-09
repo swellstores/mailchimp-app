@@ -24,6 +24,10 @@ import { getSettings } from './lib/settings';
  * So `cart.converted` deletes unconditionally, regardless of the "Sync deletions" setting.
  * That setting is about propagating a merchant's destructive action; this is about not
  * sending a wrong email.
+ *
+ * The same write that sets `order_id` also fires `cart.updated`, in no guaranteed order.
+ * `pushRecord` therefore never sends a cart with an `order_id`: it deletes it instead, so a
+ * late update cannot POST the cart back after the conversion removed it.
  * ---------------------------------------------------------------------------------------
  *
  * `config.model.conditions` is deliberately absent — see `lib/events.ts` for why.

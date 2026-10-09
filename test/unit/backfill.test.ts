@@ -96,6 +96,23 @@ describe("backfill selection", () => {
     expect(response.has_more).toBe(false);
   });
 
+  it("never selects a cart that has become an order", async () => {
+    // A converted cart sent to Mailchimp is one its abandoned-cart automation can email
+    // about, for a purchase that was already made.
+    for (const body of [
+      { collection: "carts" },
+      { collection: "carts", mode: "batch" },
+      { collection: "carts", sync_status: "error" },
+    ]) {
+      const { req, get } = harness({ body });
+
+      await backfill(req);
+
+      const params = get.mock.calls[0][1] as Record<string, any>;
+      expect(params, JSON.stringify(body)).toHaveProperty("order_id", null);
+    }
+  });
+
   it("always selects from the front and ignores any page parameter", async () => {
     // Processed records leave the selection between calls (pushed → remote_key set,
     // skipped → terminal status), so "page 2" has moved to the front by the time a
