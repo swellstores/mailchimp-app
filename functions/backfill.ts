@@ -340,15 +340,20 @@ export async function post(req: SwellRequest) {
   // Note there is deliberately no `page` here or anywhere below — see the header. The
   // selection drains from the front as records are attempted, so callers repeat the same
   // call until `has_more` is false.
+  //
+  // "Never pushed" is `$exists: false`, never `null`: the function runtime sends query
+  // values as strings, and `null` arrives as "null", which matches nothing — the backfill
+  // then reported "nothing left" on a store where nothing had been sent. (Booleans
+  // survive the trip; the API reads "false" as false.) Nothing writes `remote_key: null`.
   const where: Record<string, unknown> = syncStatus
     ? { [statusKey]: syncStatus }
-    : { [keyKey]: null, [statusKey]: { $nin: ['skipped', 'canceled', 'error'] } };
+    : { [keyKey]: { $exists: false }, [statusKey]: { $nin: ['skipped', 'canceled', 'error'] } };
   // A converted cart is an order now. Sending it would put a cart Mailchimp's abandoned-cart
   // automation acts on into the store for a purchase that was already made, so the backfill
   // never selects one, whatever else the selection asks for. (A single `record_id` re-sync
   // of one goes through `pushRecord`, which removes it from Mailchimp instead.)
   if (collection === 'carts') {
-    where.order_id = null;
+    where.order_id = { $exists: false };
   }
 
   if (text(body.mode) === 'batch' && !recordId) {

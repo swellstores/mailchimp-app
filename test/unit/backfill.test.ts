@@ -92,7 +92,7 @@ describe("backfill selection", () => {
 
     expect(get).toHaveBeenCalledTimes(1);
     const params = get.mock.calls[0][1] as Record<string, any>;
-    expect(params["$app.mailchimp.remote_key"]).toBeNull();
+    expect(params["$app.mailchimp.remote_key"]).toEqual({ $exists: false });
     expect(params["$app.mailchimp.sync_status"]).toEqual({
       $nin: ["skipped", "canceled", "error"],
     });
@@ -112,7 +112,7 @@ describe("backfill selection", () => {
       await backfill(req);
 
       const params = get.mock.calls[0][1] as Record<string, any>;
-      expect(params, JSON.stringify(body)).toHaveProperty("order_id", null);
+      expect(params, JSON.stringify(body)).toHaveProperty("order_id", { $exists: false });
     }
   });
 
@@ -337,6 +337,7 @@ function memoryStore(records: Array<Record<string, any>>) {
         ? stateOf(r)[key.slice("$app.mailchimp.".length)]
         : r[key];
       if (cond && typeof cond === "object" && "$nin" in cond) return !cond.$nin.includes(value);
+      if (cond && typeof cond === "object" && "$exists" in cond) return (value !== undefined) === cond.$exists;
       if (cond === null) return value == null;
       return value === cond;
     });
