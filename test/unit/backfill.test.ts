@@ -497,6 +497,55 @@ describe("batch error recovery", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 6b. Batch mode leaves opt-outs to direct mode
+// ---------------------------------------------------------------------------
+
+describe("batch opt-outs", () => {
+  it("leaves opted-out accounts out of a batch and points the operator at direct mode", async () => {
+    const reads: Array<Record<string, any>> = [];
+    const { req, fetchMock } = harness({
+      body: { collection: "accounts", mode: "batch" },
+      get: async (_url, params) => {
+        reads.push(params ?? {});
+        return params?.email_optin === false
+          ? { count: 2, results: [account({ id: "acc_out" })] }
+          : listResponse([account()]);
+      },
+    });
+
+    const response: Record<string, any> = await backfill(req);
+
+    expect(reads[0].email_optin).toEqual({ $ne: false });
+    expect(response.opted_out_remaining).toBe(2);
+    expect(response.message).toContain('{"collection":"accounts"}');
+    const batchBody = JSON.parse(
+      String(fetchMock.mock.calls.find(([url]) => String(url).endsWith("/batches"))?.[1]?.body),
+    );
+    expect(batchBody.operations.every((op: any) => !op.path.includes("acc_out"))).toBe(true);
+  });
+
+  it("batches opted-out accounts as before when opt-out pushing is off", async () => {
+    const original = SETTINGS.mailchimp;
+    SETTINGS.mailchimp = { ...original, push_optout: false } as any;
+    try {
+      const reads: Array<Record<string, any>> = [];
+      const { req } = harness({
+        body: { collection: "accounts", mode: "batch" },
+        get: async (_url, params) => {
+          reads.push(params ?? {});
+          return listResponse([account()]);
+        },
+      });
+      const response: Record<string, any> = await backfill(req);
+      expect(reads[0]).not.toHaveProperty("email_optin");
+      expect(response).not.toHaveProperty("opted_out_remaining");
+    } finally {
+      SETTINGS.mailchimp = original;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 7. No backfill without automations paused
 // ---------------------------------------------------------------------------
 

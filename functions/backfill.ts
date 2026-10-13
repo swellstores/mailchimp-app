@@ -352,7 +352,38 @@ export async function post(req: SwellRequest) {
   }
 
   if (text(body.mode) === 'batch' && !recordId) {
-    const submitted = await submitBatch(req, settings, collection, where, body);
+    // An opt-out has to unsubscribe an existing member and must not create one, which the
+    // direct path does with a PATCH that tolerates a 404. A batch cannot: a PATCH of a
+    // member who is not there is an errored operation, and one errored operation marks the
+    // whole batch's records 'error'. So batch mode leaves opted-out accounts in the
+    // selection, and direct mode, which picks them up, finishes them.
+    const optoutsToDirect = collection === 'accounts' && settings.push_optout;
+    const submitted = await submitBatch(
+      req,
+      settings,
+      collection,
+      optoutsToDirect ? { ...where, email_optin: { $ne: false } } : where,
+      body,
+    );
+    if (optoutsToDirect && !submitted.has_more) {
+      const optedOut = (await req.swell.get('/accounts', {
+        ...where,
+        email_optin: false,
+        limit: 1,
+      } as any)) as { count?: number } | null;
+      const remaining = Number(optedOut?.count ?? 0);
+      if (remaining > 0) {
+        return {
+          ...submitted,
+          opted_out_remaining: remaining,
+          message:
+            `${submitted.message} ${remaining} opted-out account(s) were left for direct mode, ` +
+            'which unsubscribes existing members without creating new ones. Finish them with ' +
+            `'{"collection":"accounts"}', repeated until has_more is false.`,
+          store_syncing: storeSyncing,
+        };
+      }
+    }
     return { ...submitted, store_syncing: storeSyncing };
   }
 

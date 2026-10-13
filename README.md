@@ -179,6 +179,8 @@ batch is pending, and logs a warning if the built-in Mailchimp integration is st
    batch API and returns a `batch_id` to check with `{"collection":"products","batch_id":"…"}`.
    If a batch reports errors, its records are marked *Error*; re-send them with
    `{"collection":"products","sync_status":"error"}` (direct mode) to see which failed.
+   Batch mode leaves accounts that opted out of marketing to direct mode, which unsubscribes
+   them without creating new members; the last batch call reports how many are left.
    When every collection is done, let Mailchimp's automations run again:
 
    ```bash
