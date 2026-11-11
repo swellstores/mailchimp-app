@@ -1,12 +1,12 @@
 {
   "description": "Two-way ecommerce sync with Mailchimp",
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "~0.12.0",
+    "@cloudflare/vitest-pool-workers": "~0.23.0",
     "@swell/app-types": "^1.2.3",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "typescript": "^5.9.3",
-    "vitest": "~3.2.0"
+    "vitest": "~5.1.0"
   },
   "name": "mailchimp",
   "private": true,
