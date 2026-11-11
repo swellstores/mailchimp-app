@@ -3,7 +3,7 @@
 	"id": "mailchimp",
 	"name": "Mailchimp",
 	"type": "integration",
-	"version": "1.4.2",
+	"version": "1.4.3",
 	"permissions": [],
 	"integrations": [
 		"mailchimp"

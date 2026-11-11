@@ -2,6 +2,15 @@
   "$schema": "https://json.swell.store/setting.json",
   "label": "Mailchimp",
   "description": "Two-way ecommerce sync with Mailchimp: customers, products, carts and orders into a Mailchimp ecommerce store, plus inbound unsubscribe, cleaned and email-change webhooks written back to the Swell account. Disable the native Mailchimp integration before enabling this app, otherwise every customer email is pushed twice.",
+  "actions": [
+    {
+      "id": "test_connection",
+      "label": "Test connection",
+      "function": "test-connection",
+      "loading_label": "Testing…",
+      "hint": "Checks the API key and audience ID with Mailchimp"
+    }
+  ],
   "fields": [
     {
       "id": "enabled",
