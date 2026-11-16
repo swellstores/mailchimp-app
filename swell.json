@@ -10,7 +10,6 @@
 	],
 	"support_email": "support@swell.is",
 	"documentation_url": "https://developers.swell.is/app-guides/mailchimp",
-	"price_external": true,
 	"repository_url": "https://github.com/swellstores/mailchimp-app",
 	"highlights": [
 		{
