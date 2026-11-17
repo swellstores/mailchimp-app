@@ -358,4 +358,4 @@ Issues and pull requests are welcome. For questions, visit the
 
 ## License
 
-MIT. See [LICENSE.md](LICENSE.md).
+Swell App License. See [LICENSE](LICENSE).
