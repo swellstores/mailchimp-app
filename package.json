@@ -9,7 +9,7 @@
     "vitest": "~3.2.0"
   },
   "name": "mailchimp",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "test": "vitest run",
